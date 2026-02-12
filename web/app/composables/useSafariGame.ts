@@ -3,6 +3,10 @@ import { ref } from 'vue'
 export const useSafariGame = (canvasRef: Ref<HTMLCanvasElement | null>) => {
   const GRID_SIZE = 50
   const TILE_SIZE = 16
+  const AGENT_VIEW_SIZE = 10
+  const AGENT_VIEW_RADIUS = 5
+  const AGENT_VIEW_PX = AGENT_VIEW_SIZE * TILE_SIZE // 160px
+
   const player = ref({ x: 25, y: 25 })
   const animals = ref<any[]>([])
   const obstacles = ref<any[]>([])
@@ -12,16 +16,32 @@ export const useSafariGame = (canvasRef: Ref<HTMLCanvasElement | null>) => {
 
   const initGame = () => {
     player.value = { x: Math.floor(GRID_SIZE / 2), y: Math.floor(GRID_SIZE / 2) }
+
+    // 장애물/동물/플레이어가 겹치지 않도록 occupied set 사용
+    const occupied = new Set<string>()
+    const playerKey = `${player.value.x},${player.value.y}`
+    occupied.add(playerKey)
+
+    const randomFreePos = (): { x: number; y: number } => {
+      let x: number, y: number, key: string
+      do {
+        x = Math.floor(Math.random() * GRID_SIZE)
+        y = Math.floor(Math.random() * GRID_SIZE)
+        key = `${x},${y}`
+      } while (occupied.has(key))
+      occupied.add(key)
+      return { x, y }
+    }
+
+    obstacles.value = Array.from({ length: 300 }, () => ({
+      ...randomFreePos(),
+      emoji: '🌲'
+    }))
+
     animals.value = Array.from({ length: 60 }, () => ({
-      x: Math.floor(Math.random() * GRID_SIZE),
-      y: Math.floor(Math.random() * GRID_SIZE),
+      ...randomFreePos(),
       emoji: animalEmojis[Math.floor(Math.random() * animalEmojis.length)],
       bgColor: colors[Math.floor(Math.random() * colors.length)]
-    }))
-    obstacles.value = Array.from({ length: 300 }, () => ({
-      x: Math.floor(Math.random() * GRID_SIZE),
-      y: Math.floor(Math.random() * GRID_SIZE),
-      emoji: '🌲'
     }))
   }
 
@@ -66,9 +86,18 @@ export const useSafariGame = (canvasRef: Ref<HTMLCanvasElement | null>) => {
     ctx.fillStyle = 'white'
     ctx.font = `bold ${TILE_SIZE * 0.6}px sans-serif`
     ctx.fillText('P', px + TILE_SIZE / 2, py + TILE_SIZE / 2)
+
+    // Agent view border (blue translucent rectangle)
+    const startX = Math.max(0, Math.min(player.value.x - AGENT_VIEW_RADIUS, GRID_SIZE - AGENT_VIEW_SIZE))
+    const startY = Math.max(0, Math.min(player.value.y - AGENT_VIEW_RADIUS, GRID_SIZE - AGENT_VIEW_SIZE))
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)'
+    ctx.lineWidth = 2
+    ctx.strokeRect(startX * TILE_SIZE, startY * TILE_SIZE, AGENT_VIEW_PX, AGENT_VIEW_PX)
+    ctx.fillStyle = 'rgba(59, 130, 246, 0.05)'
+    ctx.fillRect(startX * TILE_SIZE, startY * TILE_SIZE, AGENT_VIEW_PX, AGENT_VIEW_PX)
   }
 
-  const movePlayer = (dx: number, dy: number) => {
+  const movePlayer = (dx: number, dy: number): boolean => {
     const newX = player.value.x + dx
     const newY = player.value.y + dy
     if (newX >= 0 && newX < GRID_SIZE && newY >= 0 && newY < GRID_SIZE) {
@@ -76,14 +105,39 @@ export const useSafariGame = (canvasRef: Ref<HTMLCanvasElement | null>) => {
         player.value.x = newX
         player.value.y = newY
         draw()
+        return true
       }
     }
+    return false
+  }
+
+  const captureAgentView = (): string | null => {
+    const canvas = canvasRef.value
+    if (!canvas) return null
+
+    const startX = Math.max(0, Math.min(player.value.x - AGENT_VIEW_RADIUS, GRID_SIZE - AGENT_VIEW_SIZE))
+    const startY = Math.max(0, Math.min(player.value.y - AGENT_VIEW_RADIUS, GRID_SIZE - AGENT_VIEW_SIZE))
+
+    const offscreen = document.createElement('canvas')
+    offscreen.width = AGENT_VIEW_PX
+    offscreen.height = AGENT_VIEW_PX
+    const offCtx = offscreen.getContext('2d')
+    if (!offCtx) return null
+
+    offCtx.drawImage(
+      canvas,
+      startX * TILE_SIZE, startY * TILE_SIZE, AGENT_VIEW_PX, AGENT_VIEW_PX,
+      0, 0, AGENT_VIEW_PX, AGENT_VIEW_PX
+    )
+    return offscreen.toDataURL('image/png')
   }
 
   return {
     player,
+    animals,
     initGame,
     draw,
-    movePlayer
+    movePlayer,
+    captureAgentView
   }
 }

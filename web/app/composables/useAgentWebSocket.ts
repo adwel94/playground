@@ -4,13 +4,13 @@ export const useAgentWebSocket = (gameId: string) => {
   const config = useRuntimeConfig()
   const ws = ref<WebSocket | null>(null)
   const isConnected = ref(false)
-  const agentLogs = ref<{ time: string; msg: string }[]>([])
+  const agentLogs = ref<{ time: string; msg: string; logType: string; detail?: string }[]>([])
   const isAgentProcessing = ref(false)
 
-  const addLog = (msg: string) => {
+  const addLog = (msg: string, logType: string = 'system', detail?: string) => {
     const time = new Date().toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
-    agentLogs.value.unshift({ time, msg })
-    if (agentLogs.value.length > 50) agentLogs.value.pop()
+    agentLogs.value.unshift({ time, msg, logType, detail })
+    if (agentLogs.value.length > 200) agentLogs.value.pop()
   }
 
   const connect = () => {
