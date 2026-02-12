@@ -3,9 +3,12 @@ export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: true },
   modules: ['@nuxt/eslint', '@nuxtjs/tailwindcss'],
+  nitro: {
+    experimental: { websocket: true },
+  },
   runtimeConfig: {
-    public: {
-      wsUrl: process.env.NUXT_PUBLIC_WS_URL || 'ws://localhost:8000'
-    }
-  }
+    // Server-only keys (not exposed to client)
+    googleApiKey: '',
+    visionSafariModel: 'gemini-3-flash-preview',
+  },
 })

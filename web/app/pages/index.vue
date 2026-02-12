@@ -2,8 +2,8 @@
   <div class="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-4">
     <h1 class="text-4xl font-bold mb-8 text-blue-400">LLM Agent Playground</h1>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl w-full">
-      <NuxtLink 
-        to="/vision-safari" 
+      <NuxtLink
+        to="/safari"
         class="group p-6 bg-gray-800 border border-gray-700 rounded-xl hover:border-blue-500 transition-all hover:scale-105"
       >
         <h2 class="text-2xl font-bold mb-2 group-hover:text-blue-400 transition-colors">Vision Safari</h2>
