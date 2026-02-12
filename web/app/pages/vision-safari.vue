@@ -6,7 +6,7 @@ const aiInstruction = ref('');
 const expandedLogs = ref(new Set());
 
 const { isConnected, agentLogs, isAgentProcessing, addLog, sendMessage, ws } = useAgentWebSocket('vision-safari');
-const { player, animals, initGame, draw, movePlayer, captureAgentView } = useSafariGame(canvasRef);
+const { player, animals, initGame, draw, movePlayer, captureAgentView, flashBlocked } = useSafariGame(canvasRef);
 
 const logColor = {
   system: 'text-gray-400',
@@ -93,6 +93,14 @@ async function handleMoveRequest(stepId, direction, steps = 1) {
   let log = `이동 ${direction}×${actualSteps}/${steps} → (${player.value.x}, ${player.value.y})`;
   if (onAnimal) log += ` 동물 위: ${onAnimal.emoji}`;
   addLog(log, 'tool');
+
+  if (actualSteps === 0) {
+    addLog(`⛔ 이동 불가! ${direction} 방향 장애물 (나무 또는 맵 경계)`, 'error');
+    flashBlocked(direction);
+  } else if (actualSteps < steps) {
+    addLog(`⚠ 이동 중 막힘: ${steps}칸 중 ${actualSteps}칸만 이동 (장애물)`, 'error');
+    flashBlocked(direction);
+  }
 }
 
 // WebSocket message handler
@@ -126,12 +134,26 @@ function stopAgent() {
   addLog('에이전트 중단됨', 'user');
 }
 
+const keyDirMap = {
+  ArrowUp: 'UP',
+  ArrowDown: 'DOWN',
+  ArrowLeft: 'LEFT',
+  ArrowRight: 'RIGHT',
+};
+const keyDxDy = {
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+};
+
 const handleKeydown = (e) => {
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
-  if (e.key === 'ArrowUp') movePlayer(0, -1);
-  if (e.key === 'ArrowDown') movePlayer(0, 1);
-  if (e.key === 'ArrowLeft') movePlayer(-1, 0);
-  if (e.key === 'ArrowRight') movePlayer(1, 0);
+  if (!keyDirMap[e.key]) return;
+  e.preventDefault();
+  const [dx, dy] = keyDxDy[e.key];
+  if (!movePlayer(dx, dy)) {
+    flashBlocked(keyDirMap[e.key]);
+  }
 };
 
 watch(agentLogs, () => {
@@ -171,13 +193,13 @@ onUnmounted(() => {
     </header>
 
     <main class="flex-1 flex overflow-hidden">
-      <div class="flex-1 overflow-auto p-8 flex justify-center items-start bg-black">
+      <div class="flex-1 overflow-auto p-4 flex justify-center items-start bg-black">
         <div class="relative shadow-2xl border border-gray-600">
           <canvas ref="canvasRef" class="bg-white" style="image-rendering: pixelated;" />
         </div>
       </div>
 
-      <aside class="w-[32rem] bg-gray-800 border-l border-gray-700 p-4 flex flex-col gap-3 overflow-hidden">
+      <aside class="w-[40rem] bg-gray-800 border-l border-gray-700 p-4 flex flex-col gap-3 overflow-hidden">
         <!-- 상단: Agent View + Command 나란히 -->
         <div class="flex gap-3 shrink-0">
           <!-- Agent View (고정 크기) -->

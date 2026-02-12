@@ -284,6 +284,10 @@ async def tool_executor_node(state: AgentState, config: RunnableConfig) -> dict:
         ]
         if on_animal:
             log_parts.append(f"동물 위: {on_animal.get('emoji')}")
+        if actual_steps == 0:
+            log_parts.append("⛔ 장애물에 막힘!")
+        elif actual_steps < steps:
+            log_parts.append(f"⚠ {steps}칸 중 {actual_steps}칸만 이동")
         await ws.send({"type": "agent_log", "log_type": "tool", "message": " ".join(log_parts)})
         result_data = {"moved": moved, "actual_steps": actual_steps, "position": pos}
         if on_animal:

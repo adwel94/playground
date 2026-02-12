@@ -111,6 +111,50 @@ export const useSafariGame = (canvasRef: Ref<HTMLCanvasElement | null>) => {
     return false
   }
 
+  let flashTimer: ReturnType<typeof setTimeout> | null = null
+
+  const flashBlocked = (direction: string) => {
+    const canvas = canvasRef.value
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    if (flashTimer) clearTimeout(flashTimer)
+
+    const px = player.value.x * TILE_SIZE
+    const py = player.value.y * TILE_SIZE
+
+    // 막힌 방향의 타일 좌표
+    const offsets: Record<string, [number, number]> = {
+      UP: [0, -1], DOWN: [0, 1], LEFT: [-1, 0], RIGHT: [1, 0],
+    }
+    const [odx, ody] = offsets[direction] || [0, 0]
+    const bx = (player.value.x + odx) * TILE_SIZE
+    const by = (player.value.y + ody) * TILE_SIZE
+
+    let count = 0
+    const flash = () => {
+      if (count >= 4) {
+        draw()
+        return
+      }
+      if (count % 2 === 0) {
+        // 빨간 플래시: 막힌 방향 타일 + 플레이어
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.45)'
+        ctx.fillRect(bx, by, TILE_SIZE, TILE_SIZE)
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.3)'
+        ctx.beginPath()
+        ctx.arc(px + TILE_SIZE / 2, py + TILE_SIZE / 2, TILE_SIZE / 2 + 2, 0, Math.PI * 2)
+        ctx.fill()
+      } else {
+        draw()
+      }
+      count++
+      flashTimer = setTimeout(flash, 120)
+    }
+    flash()
+  }
+
   const captureAgentView = (): string | null => {
     const canvas = canvasRef.value
     if (!canvas) return null
@@ -138,6 +182,7 @@ export const useSafariGame = (canvasRef: Ref<HTMLCanvasElement | null>) => {
     initGame,
     draw,
     movePlayer,
-    captureAgentView
+    captureAgentView,
+    flashBlocked,
   }
 }
