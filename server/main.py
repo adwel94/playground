@@ -34,17 +34,15 @@ manager = ConnectionManager()
 @app.websocket("/ws/{game_id}")
 async def websocket_endpoint(websocket: WebSocket, game_id: str):
     await manager.connect(websocket)
-    
+
     handler = GAME_HANDLERS.get(game_id)
     if not handler:
         await websocket.send_text(json.dumps({"error": f"No handler for {game_id}"}))
-
+        await websocket.close()
+        manager.disconnect(websocket)
+        return
     try:
-        while True:
-            data = await websocket.receive_text()
-            message = json.loads(data)
-            if handler:
-                await handler(websocket, message)
+        await handler(websocket)
     except WebSocketDisconnect:
         manager.disconnect(websocket)
     except Exception as e:
