@@ -15,9 +15,12 @@ from utils.ws_bridge import WebSocketBridge
 
 # --- 도구 인자 스키마 ---
 
-class MoveArgs(BaseModel):
+class MoveStep(BaseModel):
     direction: Literal["UP", "DOWN", "LEFT", "RIGHT"]
     steps: int = 1
+
+class MoveArgs(BaseModel):
+    actions: list[MoveStep]
 
 class SaveNoteArgs(BaseModel):
     note: str
@@ -30,8 +33,8 @@ class DeclareFoundArgs(BaseModel):
 TOOLS = [
     Tool(
         name="Move",
-        description="플레이어를 지정한 방향으로 N칸 이동시킨다. 이동 후 위치와 동물 도달 여부를 반환한다.",
-        func=lambda direction, steps=1: None,
+        description="플레이어를 이동시킨다. 최대 4개 행동을 순서대로 실행. 각 행동은 방향(UP/DOWN/LEFT/RIGHT)과 칸수(1~3). 예: actions=[{direction:'RIGHT',steps:3},{direction:'UP',steps:2}]. 중간에 장애물에 막히면 거기서 중단된다.",
+        func=lambda actions: None,
         args_schema=MoveArgs,
     ),
     Tool(
@@ -64,7 +67,7 @@ SYSTEM_PROMPT = """너는 'Vision Safari' 게임의 AI 에이전트야.
 매 턴마다 현재 10x10 시야가 이미지로 자동 제공돼. 직접 캡처할 필요 없어.
 
 사용 가능한 도구:
-1. Move(direction, steps) - 지정 방향으로 N칸(1~10) 이동. 이동 후 위치, 실제 이동 칸수, 동물 도달 여부를 반환.
+1. Move(actions) - 최대 4개 행동을 순서대로 실행. 각 행동: {direction, steps(1~3)}. 예: actions=[{direction:"RIGHT",steps:3},{direction:"UP",steps:2}]. 중간에 장애물에 막히면 거기서 중단.
 2. SaveNote(note) - 관찰 내용을 영구 메모리에 저장. 동물 목격 정보와 추정 좌표, 장애물 위치, 탐색 메모 등을 기록할 때 사용. 히스토리 트리밍에도 유지됨.
 3. DeclareFound(target) - 특정 타겟을 찾아 도달했음을 선언 (예: "빨간배경 호랑이"). 타겟 동물 위에 도착했을 때 호출. 나머지 타겟 탐색을 위해 미션은 계속됨.
 4. DeclareDone() - 전체 미션 완료를 선언. DeclareFound로 모든 타겟을 찾은 후에만 호출.
@@ -92,8 +95,8 @@ SYSTEM_PROMPT = """너는 'Vision Safari' 게임의 AI 에이전트야.
 - 타겟이 10x10 시야에 보이면 바로 그쪽으로 이동해.
 - 보이지 않으면 저장된 메모에서 이전 목격 정보를 확인해.
 - 그래도 없으면 체계적으로 탐색해 (예: 행 단위 스캔 또는 나선형 탐색).
-- 한 번에 여러 칸(steps=1~10) 이동해서 빠르게 거리를 커버할 수 있어.
-- 나무는 이동을 막아. 우회해서 지나가.
+- Move 한 번 호출에 최대 4방향으로 연속 이동 가능. 예: 오른쪽 3칸 → 위 2칸을 한 번에 실행.
+- 나무는 이동을 막아. 막히면 해당 행동에서 중단되고 나머지는 실행되지 않아.
 """
 
 MAX_HISTORY = 40
@@ -266,35 +269,51 @@ async def tool_executor_node(state: AgentState, config: RunnableConfig) -> dict:
     args = tc["args"]
 
     if name == "Move":
-        direction = args.get("direction", "UP")
-        steps = max(1, min(10, args.get("steps", 1)))
-        await ws.send({"type": "agent_log", "log_type": "tool", "message": f"도구: Move({direction}, {steps})"})
-        response = await ws.request({
-            "type": "move_request",
-            "direction": direction,
-            "steps": steps,
-        })
-        moved = response.get("moved", False)
-        actual_steps = response.get("actual_steps", 0)
-        pos = response.get("pos", {})
-        on_animal = response.get("on_animal")
-        log_parts = [
-            f"이동 {direction}×{actual_steps}/{steps}",
-            f"→ ({pos.get('x')}, {pos.get('y')})",
-        ]
-        if on_animal:
-            log_parts.append(f"동물 위: {on_animal.get('emoji')}")
-        if actual_steps == 0:
-            log_parts.append("⛔ 장애물에 막힘!")
-        elif actual_steps < steps:
-            log_parts.append(f"⚠ {steps}칸 중 {actual_steps}칸만 이동")
-        await ws.send({"type": "agent_log", "log_type": "tool", "message": " ".join(log_parts)})
-        result_data = {"moved": moved, "actual_steps": actual_steps, "position": pos}
+        actions = args.get("actions", [])[:4]  # 최대 4개 행동
+        actions_desc = ", ".join(f"{a.get('direction','?')}×{a.get('steps',1)}" for a in actions)
+        await ws.send({"type": "agent_log", "log_type": "tool", "message": f"도구: Move([{actions_desc}])"})
+
+        results = []
+        final_pos = state.current_position
+        on_animal = None
+        blocked = False
+
+        for i, action in enumerate(actions):
+            if blocked:
+                break
+            direction = action.get("direction", "UP")
+            steps = max(1, min(3, action.get("steps", 1)))
+            response = await ws.request({
+                "type": "move_request",
+                "direction": direction,
+                "steps": steps,
+            })
+            actual_steps = response.get("actual_steps", 0)
+            pos = response.get("pos", {})
+            final_pos = pos
+
+            log_parts = [f"  [{i+1}] {direction}×{actual_steps}/{steps} → ({pos.get('x')},{pos.get('y')})"]
+            if response.get("on_animal"):
+                on_animal = response["on_animal"]
+                log_parts.append(f"동물 위: {on_animal.get('emoji')}")
+            if actual_steps == 0:
+                log_parts.append("⛔ 장애물에 막힘!")
+                blocked = True
+            elif actual_steps < steps:
+                log_parts.append(f"⚠ {steps}칸 중 {actual_steps}칸만 이동")
+                blocked = True
+            await ws.send({"type": "agent_log", "log_type": "tool", "message": " ".join(log_parts)})
+
+            results.append({"direction": direction, "requested": steps, "actual": actual_steps, "pos": pos})
+
+        result_data = {"results": results, "final_position": final_pos}
         if on_animal:
             result_data["on_animal"] = on_animal
+        if blocked:
+            result_data["blocked"] = True
         return {
             "messages": [ToolMessage(content=json.dumps(result_data), tool_call_id=tc["id"])],
-            "current_position": pos,
+            "current_position": final_pos,
             "last_tool_name": "Move",
         }
 
