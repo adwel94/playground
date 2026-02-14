@@ -7,6 +7,7 @@ export type AgentCallbacks = {
   onChat: (role: string, content: string, image?: string) => void
   onStatus: (status: string) => void
   onPlayerMoved: (result: any) => void
+  onDebug: (phase: string, data: any) => void
 }
 
 export function safePos(input: any): { x: number; y: number } {

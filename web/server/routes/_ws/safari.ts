@@ -154,6 +154,9 @@ export default defineWebSocketHandler({
               direction: result.direction,
             })
           },
+          onDebug(phase: string, data: any) {
+            broadcastToSession(sessionId, { type: 'agentDebug', phase, data })
+          },
         }, session.agentState, sessionId)
         break
       }

@@ -2,9 +2,44 @@ import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai'
 import { chromium } from 'playwright'
 import type { GameEngine } from './game-engine'
-import { getAllTools, SYSTEM_PROMPT } from './tools'
-import { createNodes, type ToolCall, type AgentCallbacks } from './nodes'
+import { getAllTools, SYSTEM_PROMPT, type AgentCallbacks } from './tools'
+import { createNodes, type ToolCall } from './nodes'
+import { DataCollector } from './data-collector'
 import type { AgentState } from '../../routes/_ws/safari'
+
+function wrapModelForDebug(
+  model: ChatGoogleGenerativeAI,
+  callbacks: AgentCallbacks,
+  dataCollector: DataCollector,
+) {
+  const original = model.completionWithRetry.bind(model)
+  model.completionWithRetry = async function (request: any, options?: any) {
+    const t0 = Date.now()
+
+    // Inject thinkingConfig to capture model's thought process
+    if (!request.generationConfig) request.generationConfig = {}
+    if (!request.generationConfig.thinkingConfig) {
+      request.generationConfig.thinkingConfig = { includeThoughts: true }
+    }
+
+    const reqPayload = {
+      systemInstruction: (model as any).client?.systemInstruction,
+      contents: request.contents,
+      tools: request.tools,
+      toolConfig: request.toolConfig,
+      generationConfig: request.generationConfig,
+    }
+    callbacks.onDebug('request-payload', reqPayload)
+    dataCollector.recordRawPayload('request', reqPayload)
+
+    const result = await original(request, options)
+    const resPayload = { raw: result.response, durationMs: Date.now() - t0 }
+    callbacks.onDebug('response-payload', resPayload)
+    dataCollector.recordRawPayload('response', resPayload)
+
+    return result
+  }
+}
 
 const GraphState = Annotation.Root({
   mission: Annotation<string>,
@@ -68,19 +103,23 @@ export async function startAgent(
     return
   }
 
-  const model = new ChatGoogleGenerativeAI({
+  const rawModel = new ChatGoogleGenerativeAI({
     apiKey: config.googleApiKey,
     model: config.visionSafariModel || 'gemini-2.0-flash',
     temperature: 0,
-  }).bindTools(getAllTools())
-
+  })
+  const dataCollector = new DataCollector(mission)
+  wrapModelForDebug(rawModel, callbacks, dataCollector)
+  const model = rawModel.bindTools(getAllTools())
   callbacks.onLog(`에이전트 Model: ${config.visionSafariModel}`, 'system')
+  callbacks.onLog(`[Dataset] 에피소드 ${dataCollector.episodeId} 수집 시작`, 'system')
   const { captureNode, agentNode, actNode, routeAfterAct } = createNodes({
     engine,
     callbacks,
     model,
     getPage: () => agentState.page,
-    isStopRequested: () => agentState.stopRequested,
+  isStopRequested: () => agentState.stopRequested,
+    dataCollector,
   })
 
   const graph = new StateGraph(GraphState)

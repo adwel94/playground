@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 export const useGame = (canvasRef: Ref<HTMLCanvasElement | null>) => {
   const GRID_SIZE = 50
-  const TILE_SIZE = 16
+  const TILE_SIZE = 30
   const AGENT_VIEW_SIZE = 10
   const AGENT_VIEW_RADIUS = 5
   const AGENT_VIEW_PX = AGENT_VIEW_SIZE * TILE_SIZE // 160px

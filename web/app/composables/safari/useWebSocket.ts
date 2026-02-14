@@ -2,6 +2,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 
 type AgentLog = { time: string; msg: string; logType: string; detail?: string }
 type ChatMessage = { role: string; content: string; image?: string; time: string }
+type DebugEntry = { step: number; request?: any; response?: any; toolResults?: any[]; time: string }
 
 function nowTime() {
   return new Date().toLocaleTimeString([], {
@@ -22,6 +23,7 @@ export function useWebSocket(sessionId: string) {
   const isConnected = ref(false)
   const lastBlocked = ref<{ direction: string; pos: { x: number; y: number } } | null>(null)
   const isStopping = ref(false)
+  const debugEntries = ref<DebugEntry[]>([])
 
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -88,6 +90,28 @@ export function useWebSocket(sessionId: string) {
           if (chatMessages.value.length > 500) chatMessages.value.shift()
           break
 
+        case 'agentDebug': {
+          const { phase, data } = msg
+          if (phase === 'request') {
+            // Step info — create new entry
+            debugEntries.value.push({ step: data.step, time: nowTime() })
+          } else if (phase === 'request-payload') {
+            // Raw API request payload — attach to last entry
+            const last = debugEntries.value[debugEntries.value.length - 1]
+            if (last) last.request = data
+          } else if (phase === 'response-payload') {
+            // Raw API response — attach to last entry
+            const last = debugEntries.value[debugEntries.value.length - 1]
+            if (last) last.response = data
+          } else if (phase === 'tool-results') {
+            // Tool execution results — attach to last entry
+            const last = debugEntries.value[debugEntries.value.length - 1]
+            if (last) last.toolResults = data.results
+          }
+          if (debugEntries.value.length > 200) debugEntries.value.shift()
+          break
+        }
+
         case 'agentStatus':
           isAgentProcessing.value = msg.status === 'running'
           if (msg.status !== 'running') isStopping.value = false
@@ -116,6 +140,7 @@ export function useWebSocket(sessionId: string) {
 
   function sendMission(mission: string) {
     chatMessages.value = []
+    debugEntries.value = []
     addLog(`유저: ${mission}`, 'user')
     send({ type: 'mission', mission })
   }
@@ -152,6 +177,7 @@ export function useWebSocket(sessionId: string) {
     isConnected,
     lastBlocked,
     isStopping,
+    debugEntries,
     addLog,
     clearChat,
     sendInit,

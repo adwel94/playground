@@ -5,15 +5,17 @@ import {useWebSocket} from "~/composables/safari/useWebSocket.ts";
 const canvasRef = ref(null);
 const logContainerRef = ref(null);
 const chatContainerRef = ref(null);
+const debugContainerRef = ref(null);
 const aiInstruction = ref('');
 const expandedLogs = ref(new Set());
+const expandedDebug = ref(new Set());
 const activeTab = ref('log');
 const autoScroll = ref(true);
 
 const sessionId = crypto.randomUUID()
 
 const { hoverCoord, draw, flashBlocked, handleCanvasMouseMove, handleCanvasMouseLeave } = useGame(canvasRef);
-const { player, animals, obstacles, agentLogs, chatMessages, isAgentProcessing, isConnected, lastBlocked, isStopping, sendInit, sendMission, sendStop, sendMove, addLog, clearChat } = useWebSocket(sessionId);
+const { player, animals, obstacles, agentLogs, chatMessages, isAgentProcessing, isConnected, lastBlocked, isStopping, debugEntries, sendInit, sendMission, sendStop, sendMove, addLog, clearChat } = useWebSocket(sessionId);
 
 const logColor = {
   system: 'text-gray-400',
@@ -52,6 +54,20 @@ function toggleDetail(index) {
   if (set.has(index)) set.delete(index);
   else set.add(index);
   expandedLogs.value = set;
+}
+
+function toggleDebug(index) {
+  const set = new Set(expandedDebug.value);
+  if (set.has(index)) set.delete(index);
+  else set.add(index);
+  expandedDebug.value = set;
+}
+
+function getThoughtText(entry) {
+  const parts = entry.response?.raw?.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return null;
+  const thoughts = parts.filter(p => p.thought === true).map(p => p.text);
+  return thoughts.length > 0 ? thoughts.join('\n') : null;
 }
 
 function scrollToBottom(el) {
@@ -105,6 +121,10 @@ watch(chatMessages, () => {
   nextTick(() => scrollToBottom(chatContainerRef.value));
 }, { deep: true });
 
+watch(debugEntries, () => {
+  nextTick(() => scrollToBottom(debugContainerRef.value));
+}, { deep: true });
+
 onMounted(() => {
   setTimeout(redraw, 200);
   window.addEventListener('keydown', handleKeydown);
@@ -135,9 +155,6 @@ onUnmounted(() => {
       <div class="flex-1 overflow-auto p-4 flex justify-center items-start bg-black">
         <div class="relative shadow-2xl border border-gray-600">
           <canvas ref="canvasRef" class="bg-white" style="image-rendering: pixelated;" @mousemove="handleCanvasMouseMove" @mouseleave="handleCanvasMouseLeave" />
-          <div v-if="hoverCoord" class="absolute top-1 left-1 bg-black/70 text-white text-[11px] font-mono px-1.5 py-0.5 rounded pointer-events-none">
-            ({{ hoverCoord.x }}, {{ hoverCoord.y }})
-          </div>
         </div>
       </div>
 
@@ -154,9 +171,16 @@ onUnmounted(() => {
               <div class="flex-1 py-1.5 bg-gray-700 rounded text-sm font-bold flex items-center justify-center gap-2">
                 <span class="animate-spin text-lg">↻</span> Running...
               </div>
-              <button class="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded transition text-sm font-bold" @click="sendStop">
+              <button
+                v-if="!isStopping"
+                class="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded transition text-sm font-bold"
+                @click="sendStop"
+              >
                 Stop
               </button>
+              <div v-else class="px-3 py-1.5 bg-yellow-700 rounded text-sm font-bold flex items-center gap-1.5 text-yellow-200">
+                <span class="animate-pulse">⏳</span> 중단 대기 중...
+              </div>
             </template>
           </div>
         </div>
@@ -172,8 +196,13 @@ onUnmounted(() => {
               :class="['px-3 py-1 rounded-t text-xs font-bold transition', activeTab === 'chat' ? 'bg-black/50 text-white' : 'bg-gray-700/50 text-gray-400 hover:text-gray-200']"
               @click="activeTab = 'chat'"
             >AI Chat</button>
+            <button
+              :class="['px-3 py-1 rounded-t text-xs font-bold transition', activeTab === 'debug' ? 'bg-purple-900/50 text-purple-200' : 'bg-gray-700/50 text-gray-400 hover:text-gray-200']"
+              @click="activeTab = 'debug'"
+            >Debug</button>
           </div>
           <div class="flex items-center gap-2">
+            <span v-if="hoverCoord" class="text-[10px] text-yellow-400 font-mono">Hover: ({{ hoverCoord.x }}, {{ hoverCoord.y }})</span>
             <span class="text-[10px] text-gray-500">Player: ({{ player.x }}, {{ player.y }})</span>
             <button
               :class="['text-[10px] px-1.5 py-0.5 rounded transition', autoScroll ? 'bg-green-700 text-green-200' : 'bg-gray-700 text-gray-400']"
@@ -217,6 +246,81 @@ onUnmounted(() => {
               </div>
               <img v-if="msg.image" :src="msg.image" class="w-32 h-32 object-contain rounded border border-gray-600 mb-1" alt="view">
               <pre class="whitespace-pre-wrap break-all text-[11px] leading-relaxed">{{ msg.content }}</pre>
+            </div>
+          </div>
+
+          <!-- Debug tab (Fine-Tuning View) -->
+          <div v-show="activeTab === 'debug'" ref="debugContainerRef" class="bg-black/50 rounded border border-gray-700 p-3 flex-1 overflow-y-auto space-y-2 font-mono text-[11px]">
+            <div v-if="debugEntries.length === 0" class="text-gray-600 text-xs text-center py-8">
+              에이전트 실행 시 fine-tuning 구조로 표시됩니다.
+            </div>
+            <div v-for="(entry, i) in debugEntries" :key="i"
+              class="rounded-lg border p-2 bg-purple-900/50 border-purple-700"
+            >
+              <div
+                class="flex items-center gap-2 cursor-pointer hover:brightness-125"
+                @click="toggleDebug(i)"
+              >
+                <span class="text-gray-500 text-[9px]">{{ expandedDebug.has(i) ? '▼' : '▶' }}</span>
+                <span class="font-bold text-purple-300 text-[10px]">Turn {{ entry.step }}</span>
+                <span class="text-gray-500 text-[9px]">{{ entry.time }}</span>
+                <span v-if="entry.response?.durationMs" class="text-yellow-400 text-[9px] ml-auto">{{ entry.response.durationMs }}ms</span>
+                <span v-if="entry.response?.raw?.usageMetadata" class="text-orange-400 text-[9px]">{{ entry.response.raw.usageMetadata.promptTokenCount ?? '?' }}+{{ entry.response.raw.usageMetadata.candidatesTokenCount ?? '?' }}tok</span>
+              </div>
+
+              <div v-if="expandedDebug.has(i)" class="mt-2 space-y-2">
+                <!-- ① System Instruction -->
+                <div v-if="entry.request?.systemInstruction" class="border-l-2 border-gray-500 pl-2">
+                  <div class="text-gray-300 font-bold text-[10px] mb-0.5">① System Instruction</div>
+                  <pre class="p-2 bg-gray-900/70 rounded text-[10px] whitespace-pre-wrap break-all text-gray-200 max-h-48 overflow-y-auto">{{ JSON.stringify(entry.request.systemInstruction, null, 2) }}</pre>
+                </div>
+
+                <!-- ② User Turn (contents) -->
+                <div v-if="entry.request?.contents" class="border-l-2 border-blue-500 pl-2">
+                  <div class="text-blue-400 font-bold text-[10px] mb-0.5">② User Turn <span class="text-gray-500 font-normal">(contents[0])</span></div>
+                  <pre class="p-2 bg-gray-900/70 rounded text-[10px] whitespace-pre-wrap break-all text-blue-200 max-h-60 overflow-y-auto">{{ JSON.stringify(entry.request.contents, null, 2) }}</pre>
+                </div>
+
+                <!-- ②.5 Thought (모델의 사고 과정) -->
+                <div v-if="getThoughtText(entry)" class="border-l-2 border-pink-500 pl-2">
+                  <div class="text-pink-400 font-bold text-[10px] mb-0.5">② Thought</div>
+                  <pre class="p-2 bg-gray-900/70 rounded text-[10px] whitespace-pre-wrap break-all text-pink-200 max-h-60 overflow-y-auto">{{ getThoughtText(entry) }}</pre>
+                </div>
+
+                <!-- ③ Model Turn (functionCall from response) -->
+                <div v-if="entry.response?.raw?.candidates?.[0]?.content" class="border-l-2 border-green-500 pl-2">
+                  <div class="text-green-400 font-bold text-[10px] mb-0.5">③ Model Turn <span class="text-gray-500 font-normal">(functionCall)</span></div>
+                  <pre class="p-2 bg-gray-900/70 rounded text-[10px] whitespace-pre-wrap break-all text-green-200 max-h-60 overflow-y-auto">{{ JSON.stringify(entry.response.raw.candidates[0].content, null, 2) }}</pre>
+                </div>
+
+                <!-- ④ Function Response (toolResults) -->
+                <div v-if="entry.toolResults" class="border-l-2 border-cyan-500 pl-2">
+                  <div class="text-cyan-400 font-bold text-[10px] mb-0.5">④ Function Response <span class="text-gray-500 font-normal">(functionResponse)</span></div>
+                  <pre class="p-2 bg-gray-900/70 rounded text-[10px] whitespace-pre-wrap break-all text-cyan-200 max-h-60 overflow-y-auto">{{ JSON.stringify({
+                    role: 'user',
+                    parts: entry.toolResults.map(r => ({ functionResponse: { name: r.name, response: r.result } }))
+                  }, null, 2) }}</pre>
+                </div>
+
+                <!-- ⑤ Tools (functionDeclarations) -->
+                <div v-if="entry.request?.tools" class="border-l-2 border-yellow-500 pl-2">
+                  <div class="text-yellow-400 font-bold text-[10px] mb-0.5">⑤ Tools <span class="text-gray-500 font-normal">(functionDeclarations)</span></div>
+                  <pre class="p-2 bg-gray-900/70 rounded text-[10px] whitespace-pre-wrap break-all text-yellow-200 max-h-48 overflow-y-auto">{{ JSON.stringify(entry.request.tools, null, 2) }}</pre>
+                </div>
+
+                <!-- ⑥ Meta -->
+                <div class="border-l-2 border-orange-500 pl-2">
+                  <div class="text-orange-400 font-bold text-[10px] mb-0.5">⑥ Meta</div>
+                  <div class="p-2 bg-gray-900/70 rounded text-[10px] text-orange-200 space-y-1">
+                    <div v-if="entry.response?.durationMs">Duration: {{ entry.response.durationMs }}ms</div>
+                    <div v-if="entry.response?.raw?.usageMetadata">
+                      Tokens: prompt={{ entry.response.raw.usageMetadata.promptTokenCount ?? '?' }}, candidates={{ entry.response.raw.usageMetadata.candidatesTokenCount ?? '?' }}, total={{ entry.response.raw.usageMetadata.totalTokenCount ?? '?' }}
+                    </div>
+                    <div v-if="entry.request?.toolConfig">Tool Config: {{ JSON.stringify(entry.request.toolConfig) }}</div>
+                    <div v-if="entry.request?.generationConfig">Generation Config: {{ JSON.stringify(entry.request.generationConfig) }}</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>

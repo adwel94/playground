@@ -2,6 +2,7 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages'
 import type { Page } from 'playwright'
 import type { GameEngine } from './game-engine'
 import { SYSTEM_PROMPT, toolHandlers, safePos, type AgentCallbacks } from './tools'
+import type { DataCollector } from './data-collector'
 
 export type ToolCall = { name: string; args: Record<string, any> }
 export { type AgentCallbacks } from './tools'
@@ -23,10 +24,11 @@ type NodeContext = {
   model: any
   getPage: () => Page | null
   isStopRequested: () => boolean
+  dataCollector?: DataCollector
 }
 
 export function createNodes(ctx: NodeContext) {
-  const { engine, callbacks, model, getPage, isStopRequested } = ctx
+  const { engine, callbacks, model, getPage, isStopRequested, dataCollector } = ctx
 
   const captureNode = async (state: any) => {
     if (isStopRequested()) {
@@ -66,8 +68,9 @@ export function createNodes(ctx: NodeContext) {
     ].join('\n')
 
     callbacks.onChat('human', contextText)
+    callbacks.onDebug('request', { step: state.step + 1 })
 
-    const response = await model.invoke([
+    const messages = [
       new SystemMessage(SYSTEM_PROMPT),
       new HumanMessage({
         content: [
@@ -75,7 +78,8 @@ export function createNodes(ctx: NodeContext) {
           { type: 'image_url', image_url: { url: state.imageDataUrl } },
         ] as any,
       }),
-    ])
+    ]
+    const response = await model.invoke(messages)
 
     const rawCalls = Array.isArray((response as any).tool_calls) ? (response as any).tool_calls : []
     const toolCalls: ToolCall[] = rawCalls.map((c: any) => ({ name: String(c.name), args: c.args || {} }))
@@ -92,6 +96,10 @@ export function createNodes(ctx: NodeContext) {
       )
       callbacks.onChat('ai', toolCalls.map(c => `🔧 ${c.name}(${JSON.stringify(c.args)})`).join('\n'))
     }
+
+    // Record turn data for dataset
+    dataCollector?.recordAgentTurn(state.step, contextText, state.imageDataUrl, toolCalls)
+
     return { lastToolCalls: toolCalls }
   }
 
@@ -110,23 +118,36 @@ export function createNodes(ctx: NodeContext) {
     let lastResult: Record<string, any> = { status: 'ok' }
     let done = false
     let stopReason = ''
+    const toolResults: { name: string; result: Record<string, any> }[] = []
 
     for (const call of calls) {
       const handler = toolHandlers[call.name]
       if (!handler) {
         lastResult = { status: 'unknown_tool', name: call.name }
+        toolResults.push({ name: call.name, result: lastResult })
         callbacks.onChat('tool', `❌ unknown tool: ${call.name}`)
         continue
       }
 
       const result = await handler(call.args, { engine, callbacks, notepad, foundTargets })
       callbacks.onChat('tool', `${call.name} → ${JSON.stringify(result.lastResult)}`)
+      toolResults.push({ name: call.name, result: result.lastResult })
       if (result.notepad !== undefined) notepad = result.notepad
       if (result.foundTargets) foundTargets = result.foundTargets
       lastResult = result.lastResult
       if (result.done) done = true
       if (result.stopReason) stopReason = result.stopReason
       if (result.shouldBreak) break
+    }
+
+    // Send tool results to debug tab
+    callbacks.onDebug('tool-results', { results: toolResults })
+
+    // Save turn data immediately
+    try {
+      await dataCollector?.saveTurn(toolResults)
+    } catch (err: any) {
+      callbacks.onLog(`[Dataset] 턴 저장 실패: ${err?.message || err}`, 'error')
     }
 
     return {
