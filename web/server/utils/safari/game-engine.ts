@@ -40,7 +40,16 @@ export const AGENT_VIEW_SIZE = 10
 export const AGENT_VIEW_RADIUS = 5
 
 const ANIMAL_EMOJIS = ['🐯', '🐘', '🦒', '🐒', '🦓', '🦁', '🐷', '🐨']
-const COLORS = ['#FFADAD', '#FFD6A5', '#FDFFB6', '#CAFFBF', '#9BF6FF', '#A0C4FF', '#BDB2FF', '#FFC6FF']
+const COLORS = [
+  '#FF0000', // Red
+  '#00FF00', // Green
+  '#0000FF', // Blue
+  '#FFFF00', // Yellow
+  '#FF00FF', // Magenta
+  '#00FFFF', // Cyan
+  '#FFA500', // Orange
+  '#800080'  // Purple
+]
 
 export function createGameEngine() {
   let player = { x: 25, y: 25 }
