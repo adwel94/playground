@@ -1,159 +1,243 @@
-"""RunPod API 래퍼 유틸리티 모듈.
+"""RunPod REST API 클라이언트.
 
-RunPod SDK를 래핑하여 GPU 조회, Pod 생성/관리, VLM 서빙 등의 기능을 제공한다.
+serverless-mlops 패턴 기반. RunPod SDK 대신 REST API를 직접 호출하여
+dockerStartCmd, 데이터센터 가용성 배치 등 payload 전체를 제어한다.
 """
 
-import runpod
+import json
+import os
+from enum import Enum
+
+import requests
 
 
-def init(api_key: str) -> None:
-    """RunPod API 키를 설정한다."""
-    runpod.api_key = api_key
+# ---------------------------------------------------------------------------
+# GPUType enum + RUNPOD_GPU_MAP  (serverless-mlops config/gpu.py 동일)
+# ---------------------------------------------------------------------------
+
+class GPUType(Enum):
+    NVIDIA_GEFORCE_RTX_4090 = "NVIDIA_GeForce_RTX_4090"
+    NVIDIA_A40 = "NVIDIA_A40"
+    NVIDIA_RTX_A5000 = "NVIDIA_RTX_A5000"
+    NVIDIA_GEFORCE_RTX_3090 = "NVIDIA_GeForce_RTX_3090"
+    NVIDIA_RTX_A4500 = "NVIDIA_RTX_A4500"
+    NVIDIA_RTX_A6000 = "NVIDIA_RTX_A6000"
+    NVIDIA_L40S = "NVIDIA_L40S"
+    NVIDIA_L4 = "NVIDIA_L4"
+    NVIDIA_H100_80GB_HBM3 = "NVIDIA_H100_80GB_HBM3"
+    NVIDIA_RTX_4000_ADA_GENERATION = "NVIDIA_RTX_4000_Ada_Generation"
+    NVIDIA_A100_80GB_PCIE = "NVIDIA_A100_80GB_PCIe"
+    NVIDIA_A100_SXM4_80GB = "NVIDIA_A100-SXM4-80GB"
+    NVIDIA_RTX_A4000 = "NVIDIA_RTX_A4000"
+    NVIDIA_RTX_6000_ADA_GENERATION = "NVIDIA_RTX_6000_Ada_Generation"
+    NVIDIA_RTX_2000_ADA_GENERATION = "NVIDIA_RTX_2000_Ada_Generation"
+    NVIDIA_H200 = "NVIDIA_H200"
+    NVIDIA_L40 = "NVIDIA_L40"
+    NVIDIA_H100_NVL = "NVIDIA_H100_NVL"
+    NVIDIA_H100_PCIE = "NVIDIA_H100_PCIe"
+    NVIDIA_GEFORCE_RTX_3080_TI = "NVIDIA_GeForce_RTX_3080_Ti"
+    NVIDIA_GEFORCE_RTX_3080 = "NVIDIA_GeForce_RTX_3080"
+    NVIDIA_GEFORCE_RTX_3070 = "NVIDIA_GeForce_RTX_3070"
+    TESLA_V100_PCIE_16GB = "Tesla_V100-PCIE-16GB"
+    AMD_INSTINCT_MI300X_OAM = "AMD_Instinct_MI300X_OAM"
+    NVIDIA_RTX_A2000 = "NVIDIA_RTX_A2000"
+    TESLA_V100_FHHL_16GB = "Tesla_V100-FHHL-16GB"
+    NVIDIA_GEFORCE_RTX_4080_SUPER = "NVIDIA_GeForce_RTX_4080_SUPER"
+    TESLA_V100_SXM2_16GB = "Tesla_V100-SXM2-16GB"
+    NVIDIA_GEFORCE_RTX_4070_TI = "NVIDIA_GeForce_RTX_4070_Ti"
+    TESLA_V100_SXM2_32GB = "Tesla_V100-SXM2-32GB"
+    NVIDIA_RTX_4000_SFF_ADA_GENERATION = "NVIDIA_RTX_4000_SFF_Ada_Generation"
+    NVIDIA_RTX_5000_ADA_GENERATION = "NVIDIA_RTX_5000_Ada_Generation"
+    NVIDIA_GEFORCE_RTX_5090 = "NVIDIA_GeForce_RTX_5090"
+    NVIDIA_A30 = "NVIDIA_A30"
+    NVIDIA_GEFORCE_RTX_4080 = "NVIDIA_GeForce_RTX_4080"
+    NVIDIA_GEFORCE_RTX_5080 = "NVIDIA_GeForce_RTX_5080"
+    NVIDIA_GEFORCE_RTX_3090_TI = "NVIDIA_GeForce_RTX_3090_Ti"
+    NVIDIA_B200 = "NVIDIA_B200"
 
 
-def get_gpu_list() -> list[dict]:
-    """전체 GPU 목록을 VRAM순으로 정렬하여 반환한다."""
-    gpus = runpod.get_gpus()
-    gpus.sort(key=lambda g: g.get("memoryInGb", 0))
+RUNPOD_GPU_MAP = {
+    GPUType.NVIDIA_GEFORCE_RTX_4090: "NVIDIA GeForce RTX 4090",
+    GPUType.NVIDIA_A40: "NVIDIA A40",
+    GPUType.NVIDIA_RTX_A5000: "NVIDIA RTX A5000",
+    GPUType.NVIDIA_GEFORCE_RTX_3090: "NVIDIA GeForce RTX 3090",
+    GPUType.NVIDIA_RTX_A4500: "NVIDIA RTX A4500",
+    GPUType.NVIDIA_RTX_A6000: "NVIDIA RTX A6000",
+    GPUType.NVIDIA_L40S: "NVIDIA L40S",
+    GPUType.NVIDIA_L4: "NVIDIA L4",
+    GPUType.NVIDIA_H100_80GB_HBM3: "NVIDIA H100 80GB HBM3",
+    GPUType.NVIDIA_RTX_4000_ADA_GENERATION: "NVIDIA RTX 4000 Ada Generation",
+    GPUType.NVIDIA_A100_80GB_PCIE: "NVIDIA A100 80GB PCIe",
+    GPUType.NVIDIA_A100_SXM4_80GB: "NVIDIA A100-SXM4-80GB",
+    GPUType.NVIDIA_RTX_A4000: "NVIDIA RTX A4000",
+    GPUType.NVIDIA_RTX_6000_ADA_GENERATION: "NVIDIA RTX 6000 Ada Generation",
+    GPUType.NVIDIA_RTX_2000_ADA_GENERATION: "NVIDIA RTX 2000 Ada Generation",
+    GPUType.NVIDIA_H200: "NVIDIA H200",
+    GPUType.NVIDIA_L40: "NVIDIA L40",
+    GPUType.NVIDIA_H100_NVL: "NVIDIA H100 NVL",
+    GPUType.NVIDIA_H100_PCIE: "NVIDIA H100 PCIe",
+    GPUType.NVIDIA_GEFORCE_RTX_3080_TI: "NVIDIA GeForce RTX 3080 Ti",
+    GPUType.NVIDIA_GEFORCE_RTX_3080: "NVIDIA GeForce RTX 3080",
+    GPUType.NVIDIA_GEFORCE_RTX_3070: "NVIDIA GeForce RTX 3070",
+    GPUType.TESLA_V100_PCIE_16GB: "Tesla V100-PCIE-16GB",
+    GPUType.AMD_INSTINCT_MI300X_OAM: "AMD Instinct MI300X OAM",
+    GPUType.NVIDIA_RTX_A2000: "NVIDIA RTX A2000",
+    GPUType.TESLA_V100_FHHL_16GB: "Tesla V100-FHHL-16GB",
+    GPUType.NVIDIA_GEFORCE_RTX_4080_SUPER: "NVIDIA GeForce RTX 4080 SUPER",
+    GPUType.TESLA_V100_SXM2_16GB: "Tesla V100-SXM2-16GB",
+    GPUType.NVIDIA_GEFORCE_RTX_4070_TI: "NVIDIA GeForce RTX 4070 Ti",
+    GPUType.TESLA_V100_SXM2_32GB: "Tesla V100-SXM2-32GB",
+    GPUType.NVIDIA_RTX_4000_SFF_ADA_GENERATION: "NVIDIA RTX 4000 SFF Ada Generation",
+    GPUType.NVIDIA_RTX_5000_ADA_GENERATION: "NVIDIA RTX 5000 Ada Generation",
+    GPUType.NVIDIA_GEFORCE_RTX_5090: "NVIDIA GeForce RTX 5090",
+    GPUType.NVIDIA_A30: "NVIDIA A30",
+    GPUType.NVIDIA_GEFORCE_RTX_4080: "NVIDIA GeForce RTX 4080",
+    GPUType.NVIDIA_GEFORCE_RTX_5080: "NVIDIA GeForce RTX 5080",
+    GPUType.NVIDIA_GEFORCE_RTX_3090_TI: "NVIDIA GeForce RTX 3090 Ti",
+    GPUType.NVIDIA_B200: "NVIDIA B200",
+}
 
-    print(f"{'GPU ID':<30} {'VRAM(GB)':>8} {'Secure':>8} {'Community':>10}")
-    print("-" * 60)
-    for gpu in gpus:
-        gpu_id = gpu.get("id", "N/A")
-        vram = gpu.get("memoryInGb", "N/A")
-        secure_price = gpu.get("securePrice", "N/A")
-        community_price = gpu.get("communityPrice", "N/A")
-        print(f"{gpu_id:<30} {vram:>8} ${secure_price:>7} ${community_price:>9}")
 
-    return gpus
+# ---------------------------------------------------------------------------
+# REST API 기본 설정
+# ---------------------------------------------------------------------------
+
+_BASE_URL = "https://rest.runpod.io/v1/pods"
 
 
-def get_gpu_detail(gpu_id: str) -> dict:
-    """특정 GPU의 상세 정보(가격, 재고 등)를 반환한다."""
-    gpu = runpod.get_gpu(gpu_id)
-    return gpu
+def _headers() -> dict:
+    token = os.getenv("RUNPOD_API_KEY")
+    return {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
 
 
-def create_pod(
+# ---------------------------------------------------------------------------
+# REST API 함수 4개  (serverless-mlops cloud/runpod/runpod_client.py 동일)
+# ---------------------------------------------------------------------------
+
+def create(
     name: str,
-    image_name: str,
-    gpu_type_id: str,
+    env: dict[str, str] = {},
+    gpu_id: GPUType = GPUType.NVIDIA_GEFORCE_RTX_4090,
     gpu_count: int = 1,
-    volume_in_gb: int = 50,
-    container_disk_in_gb: int = 20,
-    ports: str | None = "8888/http,22/tcp",
-    env: dict | None = None,
-    **kwargs,
-) -> dict:
-    """Pod을 생성한다.
+    volume: int = 50,
+    image_name: str = "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+    start_command: list[str] = [],
+    ports: list[str] = ["8888/http,22/tcp"],
+) -> str:
+    """Pod을 생성하고 pod_id를 반환한다.
 
-    Args:
-        name: Pod 이름
-        image_name: Docker 이미지 이름
-        gpu_type_id: GPU 타입 ID (예: "NVIDIA GeForce RTX 4090")
-        gpu_count: GPU 수
-        volume_in_gb: 영구 볼륨 크기(GB)
-        container_disk_in_gb: 컨테이너 디스크 크기(GB)
-        ports: 포트 매핑 문자열
-        env: 환경변수 딕셔너리
-        **kwargs: runpod.create_pod에 전달할 추가 파라미터
+    26개 데이터센터 가용성 우선 배치, dockerStartCmd 지원.
     """
-    pod = runpod.create_pod(
-        name=name,
-        image_name=image_name,
-        gpu_type_id=gpu_type_id,
-        gpu_count=gpu_count,
-        volume_in_gb=volume_in_gb,
-        container_disk_in_gb=container_disk_in_gb,
-        ports=ports,
-        env=env or {},
-        **kwargs,
-    )
-    print(f"Pod 생성됨: {pod.get('id', 'N/A')} ({name})")
-    return pod
+    payload = {
+        "cloudType": "COMMUNITY",
+        "computeType": "GPU",
+        "containerDiskInGb": 30,
+        "cpuFlavorPriority": "availability",
+        "dataCenterIds": [
+            "EU-RO-1", "CA-MTL-1", "EU-SE-1", "US-IL-1", "EUR-IS-1",
+            "EU-CZ-1", "US-TX-3", "EUR-IS-2", "US-KS-2", "US-GA-2",
+            "US-WA-1", "US-TX-1", "CA-MTL-3", "EU-NL-1", "US-TX-4",
+            "US-CA-2", "US-NC-1", "OC-AU-1", "US-DE-1", "EUR-IS-3",
+            "CA-MTL-2", "AP-JP-1", "EUR-NO-1", "EU-FR-1", "US-KS-3",
+            "US-GA-1",
+        ],
+        "dataCenterPriority": "availability",
+        "dockerStartCmd": start_command,
+        "imageName": image_name,
+        "env": env,
+        "globalNetworking": False,
+        "gpuTypeIds": [RUNPOD_GPU_MAP[gpu_id]],
+        "gpuCount": gpu_count,
+        "gpuTypePriority": "availability",
+        "interruptible": False,
+        "locked": False,
+        "name": name,
+        "ports": ports,
+        "vcpuCount": 2,
+        "volumeInGb": volume,
+        "volumeMountPath": "/workspace",
+    }
+
+    response = requests.post(_BASE_URL, json=payload, headers=_headers())
+    
+    if not response.ok:
+        print(f"RunPod API Create Error (Status: {response.status_code})")
+        print(f"Response Body: {response.text}")
+        response.raise_for_status()
+
+    data = response.json()
+    if "id" not in data:
+        print(f"Unexpected API Response (Missing 'id'): {data}")
+        raise KeyError(f"RunPod API did not return a pod ID. Response: {data}")
+
+    return data["id"]
 
 
-def get_pods() -> list[dict]:
+def delete(pod_id: str) -> str:
+    """Pod을 삭제한다."""
+    response = requests.delete(f"{_BASE_URL}/{pod_id}", headers=_headers())
+    if not response.ok:
+        print(f"RunPod API Delete Error (Status: {response.status_code}, Pod: {pod_id})")
+        print(f"Response Body: {response.text}")
+        response.raise_for_status()
+    return response.text
+
+
+def pods() -> list[dict]:
     """전체 Pod 목록을 반환한다."""
-    pods = runpod.get_pods()
-
-    print(f"{'Pod ID':<28} {'Name':<25} {'Status':<12} {'GPU':<25}")
-    print("-" * 90)
-    for pod in pods:
-        pod_id = pod.get("id", "N/A")
-        name = pod.get("name", "N/A")
-        status = pod.get("desiredStatus", "N/A")
-        gpu = pod.get("machine", {}).get("gpuDisplayName", "N/A") if pod.get("machine") else "N/A"
-        print(f"{pod_id:<28} {name:<25} {status:<12} {gpu:<25}")
-
-    return pods
+    response = requests.get(_BASE_URL, headers=_headers())
+    if not response.ok:
+        print(f"RunPod API List Error (Status: {response.status_code})")
+        print(f"Response Body: {response.text}")
+        response.raise_for_status()
+    return response.json()
 
 
-def get_pod(pod_id: str) -> dict:
+def pod(pod_id: str) -> dict:
     """특정 Pod의 상세 정보를 반환한다."""
-    pod = runpod.get_pod(pod_id)
-    return pod
+    response = requests.get(f"{_BASE_URL}/{pod_id}", headers=_headers())
+    if not response.ok:
+        print(f"RunPod API Get Error (Status: {response.status_code}, Pod: {pod_id})")
+        print(f"Response Body: {response.text}")
+        response.raise_for_status()
+    return response.json()
 
 
-def stop_pod(pod_id: str) -> None:
-    """Pod을 정지한다 (과금 중지, 볼륨 유지)."""
-    runpod.stop_pod(pod_id)
-    print(f"Pod 정지됨: {pod_id}")
-
-
-def resume_pod(pod_id: str, gpu_count: int = 1) -> None:
-    """정지된 Pod을 재개한다."""
-    runpod.resume_pod(pod_id, gpu_count=gpu_count)
-    print(f"Pod 재개됨: {pod_id}")
-
-
-def terminate_pod(pod_id: str) -> None:
-    """Pod을 완전히 삭제한다 (볼륨 포함)."""
-    runpod.terminate_pod(pod_id)
-    print(f"Pod 삭제됨: {pod_id}")
-
+# ---------------------------------------------------------------------------
+# playground 전용 헬퍼
+# ---------------------------------------------------------------------------
 
 def create_vlm_pod(
     name: str,
     model_name: str,
-    gpu_type_id: str = "NVIDIA GeForce RTX 4090",
+    gpu_id: GPUType = GPUType.NVIDIA_GEFORCE_RTX_4090,
     gpu_count: int = 1,
-    volume_in_gb: int = 100,
-    container_disk_in_gb: int = 20,
+    volume: int = 100,
     max_model_len: int = 4096,
     gpu_memory_utilization: float = 0.9,
     dtype: str = "half",
-    **kwargs,
-) -> dict:
-    """VLM 서빙용 Pod을 vLLM Worker 이미지와 프리셋 환경변수로 생성한다.
-
-    Args:
-        name: Pod 이름
-        model_name: HuggingFace 모델 이름 (예: "Qwen/Qwen3-VL-2B")
-        gpu_type_id: GPU 타입 ID
-        gpu_count: GPU 수
-        volume_in_gb: 영구 볼륨 크기(GB)
-        container_disk_in_gb: 컨테이너 디스크 크기(GB)
-        max_model_len: 최대 시퀀스 길이
-        gpu_memory_utilization: GPU 메모리 사용률 (0.0~1.0)
-        dtype: 데이터 타입 (half, float16, bfloat16 등)
-        **kwargs: create_pod에 전달할 추가 파라미터
-    """
+    hf_token: str = "",
+) -> str:
+    """VLM 서빙용 Pod을 vLLM Worker 이미지로 생성한다."""
     env = {
         "MODEL_NAME": model_name,
         "DTYPE": dtype,
         "GPU_MEMORY_UTILIZATION": str(gpu_memory_utilization),
         "MAX_MODEL_LEN": str(max_model_len),
+        "ENABLE_AUTO_TOOL_CHOICE": True,
+        "TOOL_CALL_PARSER": "hermes",
+        "HF_TOKEN": hf_token or os.getenv("HF_TOKEN", ""),
+        "HF_HOME": "/workspace/huggingface",
+        "LD_LIBRARY_PATH" :"/lib64:/usr/local/cuda/lib64"
     }
-
-    return create_pod(
+    return create(
         name=name,
-        image_name="runpod/worker-v1-vllm:v2.7.0stable-cuda12.1.0",
-        gpu_type_id=gpu_type_id,
-        gpu_count=gpu_count,
-        volume_in_gb=volume_in_gb,
-        container_disk_in_gb=container_disk_in_gb,
-        ports="8000/http,22/tcp",
         env=env,
-        **kwargs,
+        gpu_id=gpu_id,
+        gpu_count=gpu_count,
+        volume=volume,
+        image_name="vllm/vllm-openai:latest",
     )
