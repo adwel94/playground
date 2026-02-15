@@ -2,9 +2,10 @@ import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
 import { ChatGoogleGenerativeAI } from '@langchain/google-genai'
 import { chromium } from 'playwright'
 import type { GameEngine } from './game-engine'
-import { getAllTools, SYSTEM_PROMPT, type AgentCallbacks } from './tools'
+import { SYSTEM_PROMPT, type AgentCallbacks } from './tools'
 import { createNodes, type ToolCall } from './nodes'
 import { DataCollector } from './data-collector'
+import { models } from './llm'
 import type { AgentState } from '../../routes/_ws/safari'
 
 function wrapModelForDebug(
@@ -60,6 +61,7 @@ export async function startAgent(
   callbacks: AgentCallbacks,
   agentState: AgentState,
   sessionId: string,
+  modelId?: string,
 ) {
   if (agentState.isRunning) {
     callbacks.onLog('에이전트가 이미 실행 중입니다.', 'error')
@@ -71,15 +73,7 @@ export async function startAgent(
   callbacks.onStatus('running')
   callbacks.onChat('human', mission)
 
-  // Get runtime config for API key
-  const config = useRuntimeConfig()
-
-  if (!config.googleApiKey) {
-    callbacks.onLog('GOOGLE_API_KEY가 설정되지 않았습니다.', 'error')
-    callbacks.onStatus('stopped')
-    agentState.isRunning = false
-    return
-  }
+  const resolvedModelId = modelId || 'gemini'
 
   // Launch Playwright browser
   try {
@@ -103,15 +97,21 @@ export async function startAgent(
     return
   }
 
-  const rawModel = new ChatGoogleGenerativeAI({
-    apiKey: config.googleApiKey,
-    model: config.visionSafariModel || 'gemini-2.0-flash',
-    temperature: 0,
-  })
   const dataCollector = new DataCollector(mission)
-  wrapModelForDebug(rawModel, callbacks, dataCollector)
-  const model = rawModel.bindTools(getAllTools())
-  callbacks.onLog(`에이전트 Model: ${config.visionSafariModel}`, 'system')
+  const entry = models.find(m => m.id === resolvedModelId)
+  if (!entry) {
+    callbacks.onLog(`사용할 수 없는 모델: ${resolvedModelId}`, 'error')
+    callbacks.onStatus('stopped')
+    agentState.isRunning = false
+    await cleanupBrowser(agentState)
+    return
+  }
+
+  if (entry.provider === 'gemini') {
+    wrapModelForDebug(entry.raw as ChatGoogleGenerativeAI, callbacks, dataCollector)
+  }
+  const model = entry.model
+  callbacks.onLog(`에이전트 Model: ${entry.label}`, 'system')
   callbacks.onLog(`[Dataset] 에피소드 ${dataCollector.episodeId} 수집 시작`, 'system')
   const { captureNode, agentNode, actNode, routeAfterAct } = createNodes({
     engine,

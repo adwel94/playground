@@ -11,6 +11,8 @@ const expandedLogs = ref(new Set());
 const expandedDebug = ref(new Set());
 const activeTab = ref('log');
 const autoScroll = ref(true);
+const selectedModelId = ref('gemini');
+const { data: availableModels } = useFetch('/api/safari/models');
 
 const sessionId = crypto.randomUUID()
 
@@ -83,7 +85,7 @@ function redraw() {
 async function sendToAgent() {
   if (!aiInstruction.value.trim()) return;
   clearChat();
-  sendMission(aiInstruction.value);
+  sendMission(aiInstruction.value, selectedModelId.value);
 }
 
 const keyDirMap = {
@@ -162,6 +164,11 @@ onUnmounted(() => {
         <!-- Command input -->
         <div class="shrink-0">
           <h2 class="text-sm font-semibold uppercase text-gray-500 mb-1">Command</h2>
+          <div class="flex gap-2 mb-2">
+            <select v-model="selectedModelId" class="bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:border-blue-500 outline-none">
+              <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+            </select>
+          </div>
           <textarea v-model="aiInstruction" placeholder="예: 빨간 호랑이와 분홍 기린을 찾아" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-blue-100 focus:border-blue-500 outline-none resize-none h-16" />
           <div class="flex gap-2 mt-2">
             <button v-if="!isAgentProcessing" class="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 rounded transition text-sm font-bold" @click="sendToAgent">

@@ -133,6 +133,7 @@ export default defineWebSocketHandler({
         if (!agentRunnerModule) {
           agentRunnerModule = await import('../../utils/safari/graph')
         }
+        const modelId = String(msg.modelId || 'gemini')
         agentRunnerModule.startAgent(mission, engine, {
           onLog(logMsg: string, logType: string, detail?: string) {
             broadcastToSession(sessionId, { type: 'agentLog', msg: logMsg, logType, detail })
@@ -157,7 +158,7 @@ export default defineWebSocketHandler({
           onDebug(phase: string, data: any) {
             broadcastToSession(sessionId, { type: 'agentDebug', phase, data })
           },
-        }, session.agentState, sessionId)
+        }, session.agentState, sessionId, modelId)
         break
       }
 

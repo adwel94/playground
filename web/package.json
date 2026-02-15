@@ -13,6 +13,7 @@
     "@langchain/core": "^1.1.24",
     "@langchain/google-genai": "^2.1.18",
     "@langchain/langgraph": "^1.1.4",
+    "@langchain/openai": "^1.2.7",
     "@nuxt/eslint": "^1.15.1",
     "@nuxtjs/tailwindcss": "^6.14.0",
     "nuxt": "^4.3.1",

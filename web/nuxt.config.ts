@@ -10,5 +10,6 @@ export default defineNuxtConfig({
     // Server-only keys (not exposed to client)
     googleApiKey: '',
     visionSafariModel: 'gemini-3-flash-preview',
+    vllmBaseUrl: '',
   },
 })

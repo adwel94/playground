@@ -138,11 +138,15 @@ export function useWebSocket(sessionId: string) {
     send({ type: 'init' })
   }
 
-  function sendMission(mission: string) {
+  function sendMission(mission: string, modelId?: string) {
     chatMessages.value = []
     debugEntries.value = []
     addLog(`유저: ${mission}`, 'user')
-    send({ type: 'mission', mission })
+    send({
+      type: 'mission',
+      mission,
+      modelId: modelId || 'gemini',
+    })
   }
 
   function sendStop() {
