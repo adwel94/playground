@@ -86,8 +86,17 @@ export function createNodes(ctx: NodeContext) {
     callbacks.onDebug('request-payload', reqPayload)
     dataCollector?.recordRawPayload('request', reqPayload)
 
+    callbacks.onLog(`[턴 ${state.step + 1}] 모델 응답 대기 중...`, 'system')
     const t0 = Date.now()
-    const response = await model.invoke(messages)
+    let response
+    try {
+      response = await model.invoke(messages)
+    } catch (err: any) {
+      const durationMs = Date.now() - t0
+      callbacks.onLog(`[턴 ${state.step + 1}] 모델 호출 실패 (${(durationMs / 1000).toFixed(1)}s): ${err?.message || err}`, 'error')
+      return { done: true, stopReason: 'model error' }
+    }
+    const durationMs = Date.now() - t0
 
     const resPayload = {
       content: response.content,
@@ -95,17 +104,23 @@ export function createNodes(ctx: NodeContext) {
       additional_kwargs: (response as any).additional_kwargs,
       response_metadata: (response as any).response_metadata,
       usage_metadata: (response as any).usage_metadata,
-      durationMs: Date.now() - t0,
+      durationMs,
     }
     callbacks.onDebug('response-payload', resPayload)
     dataCollector?.recordRawPayload('response', resPayload)
+    callbacks.onLog(`[턴 ${state.step + 1}] 모델 응답 수신 (${(durationMs / 1000).toFixed(1)}s)`, 'system')
 
     const rawCalls = Array.isArray((response as any).tool_calls) ? (response as any).tool_calls : []
     const toolCalls: ToolCall[] = rawCalls.map((c: any) => ({ name: String(c.name), args: c.args || {} }))
 
     if (toolCalls.length === 0) {
-      callbacks.onLog(`[턴 ${state.step + 1}] agent 결정: none`, 'response')
-      callbacks.onChat('ai', '(tool call 없음)')
+      const text = typeof response.content === 'string'
+        ? response.content
+        : Array.isArray(response.content)
+          ? response.content.map((b: any) => b.text || b.thinking || '').filter(Boolean).join('\n')
+          : ''
+      callbacks.onLog(`[턴 ${state.step + 1}] agent 결정: none`, 'response', text || undefined)
+      callbacks.onChat('ai', text || '(tool call 없음)')
     } else {
       const names = toolCalls.map(c => c.name).join(' + ')
       callbacks.onLog(

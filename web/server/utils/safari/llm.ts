@@ -52,9 +52,10 @@ export function initModels() {
         model: 'Qwen3-VL-2B-Thinking-FP8',
         apiKey: 'EMPTY',
         temperature: 0,
+        maxTokens: 4096,
       })
       models.push({
-        id: 'vllm-local',
+        id: 'vllm-Qwen3-VL-2B-Thinking-FP8',
         label: 'vLLM (Qwen/Qwen3-VL-2B-Thinking-FP8)',
         provider: 'vllm',
         collectData: false,
@@ -71,13 +72,14 @@ export function initModels() {
     if (config.runpodApiUrl && config.runpodApiKey) {
       const raw = new ChatOpenAI({
         configuration: { baseURL: config.runpodApiUrl as string },
-        model: 'qwen/qwen3-vl-4b-thinking',
+        model: 'qwen/qwen3-vl-4b-thinking-fp8',
         apiKey: config.runpodApiKey as string,
         temperature: 0,
+        maxTokens: 4096,
       })
       models.push({
-        id: 'vllm-Qwen3-VL-4B',
-        label: 'vLLM (Qwen/Qwen3-VL-4B-Thinking)',
+        id: 'vllm-Qwen3-VL-4B-FP8',
+        label: 'vLLM (Qwen/Qwen3-VL-4B-Thinking-FP8)',
         provider: 'vllm',
         collectData: false,
         model: raw.bindTools(tools),
