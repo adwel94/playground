@@ -158,6 +158,13 @@ function connect() {
       } else {
         nextTick(drawAgentView)
       }
+    } else if (msg.type === 'animalCaught') {
+      if (msg.success && msg.position) {
+        animals.value = animals.value.filter(
+          a => !(a.x === msg.position.x && a.y === msg.position.y)
+        )
+        nextTick(drawAgentView)
+      }
     }
   }
 }

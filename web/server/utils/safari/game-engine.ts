@@ -18,7 +18,13 @@ export type MoveResult = {
   actualSteps: number
   blocked: boolean
   pos: { x: number; y: number }
-  onAnimal: { emoji: string; bgColor: string } | null
+}
+
+export type CatchResult = {
+  success: boolean
+  animal?: { emoji: string; bgColor: string }
+  position?: { x: number; y: number }
+  reason?: string
 }
 
 export type GameState = {
@@ -100,19 +106,46 @@ export function createGameEngine() {
       const newY = player.y + dy
       if (newX < 0 || newX >= GRID_SIZE || newY < 0 || newY >= GRID_SIZE) break
       if (obstacles.some(o => o.x === newX && o.y === newY)) break
+      if (animals.some(a => a.x === newX && a.y === newY)) break
       player.x = newX
       player.y = newY
       actualSteps++
     }
-
-    const onAnimal = animals.find(a => a.x === player.x && a.y === player.y) || null
 
     return {
       moved: actualSteps > 0,
       actualSteps,
       blocked: actualSteps < steps,
       pos: { x: player.x, y: player.y },
-      onAnimal: onAnimal ? { emoji: onAnimal.emoji, bgColor: onAnimal.bgColor } : null,
+    }
+  }
+
+  function catchAnimal(direction: Direction): CatchResult {
+    const deltas: Record<Direction, [number, number]> = {
+      UP: [0, -1],
+      DOWN: [0, 1],
+      LEFT: [-1, 0],
+      RIGHT: [1, 0],
+    }
+    const [dx, dy] = deltas[direction]
+    const targetX = player.x + dx
+    const targetY = player.y + dy
+
+    if (targetX < 0 || targetX >= GRID_SIZE || targetY < 0 || targetY >= GRID_SIZE) {
+      return { success: false, reason: 'out_of_bounds' }
+    }
+
+    const idx = animals.findIndex(a => a.x === targetX && a.y === targetY)
+    if (idx === -1) {
+      return { success: false, reason: 'no_animal' }
+    }
+
+    const caught = animals[idx]!
+    animals.splice(idx, 1)
+    return {
+      success: true,
+      animal: { emoji: caught.emoji, bgColor: caught.bgColor },
+      position: { x: targetX, y: targetY },
     }
   }
 
@@ -149,6 +182,7 @@ export function createGameEngine() {
   return {
     initGame,
     movePlayer,
+    catchAnimal,
     getState,
     getAgentView,
     getPlayer,

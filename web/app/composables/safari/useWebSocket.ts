@@ -76,6 +76,14 @@ export function useWebSocket(sessionId: string) {
           player.value = msg.pos
           break
 
+        case 'animalCaught':
+          if (msg.success && msg.position) {
+            animals.value = animals.value.filter(
+              a => !(a.x === msg.position.x && a.y === msg.position.y)
+            )
+          }
+          break
+
         case 'agentLog':
           agentLogs.value.push({ time: nowTime(), msg: msg.msg, logType: msg.logType, detail: msg.detail })
           if (agentLogs.value.length > 300) agentLogs.value.shift()
@@ -159,6 +167,10 @@ export function useWebSocket(sessionId: string) {
     send({ type: 'move', direction, steps })
   }
 
+  function sendCatch() {
+    send({ type: 'catch' })
+  }
+
   function clearChat() {
     chatMessages.value = []
   }
@@ -188,6 +200,7 @@ export function useWebSocket(sessionId: string) {
     sendMission,
     sendStop,
     sendMove,
+    sendCatch,
     connect,
   }
 }

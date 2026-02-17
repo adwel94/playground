@@ -119,9 +119,29 @@ export default defineWebSocketHandler({
           moved: result.moved,
           blocked: result.blocked,
           actualSteps: result.actualSteps,
-          onAnimal: result.onAnimal,
           direction,
         })
+        break
+      }
+
+      case 'catch': {
+        const directions: Direction[] = ['UP', 'DOWN', 'LEFT', 'RIGHT']
+        for (const dir of directions) {
+          const result = engine.catchAnimal(dir)
+          if (result.success) {
+            broadcastToSession(sessionId, {
+              type: 'animalCaught',
+              success: true,
+              animal: result.animal,
+              position: result.position,
+            })
+            broadcastToSession(sessionId, {
+              type: 'gameState',
+              state: engine.getState(),
+            })
+            break
+          }
+        }
         break
       }
 
@@ -151,8 +171,19 @@ export default defineWebSocketHandler({
               moved: result.moved,
               blocked: result.blocked,
               actualSteps: result.actualSteps,
-              onAnimal: result.onAnimal,
               direction: result.direction,
+            })
+          },
+          onAnimalCaught(result: any, gameState: any) {
+            broadcastToSession(sessionId, {
+              type: 'animalCaught',
+              success: result.success,
+              animal: result.animal,
+              position: result.position,
+            })
+            broadcastToSession(sessionId, {
+              type: 'gameState',
+              state: gameState,
             })
           },
           onDebug(phase: string, data: any) {

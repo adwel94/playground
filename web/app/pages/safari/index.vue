@@ -17,7 +17,7 @@ const { data: availableModels } = useFetch('/api/safari/models');
 const sessionId = crypto.randomUUID()
 
 const { hoverCoord, draw, flashBlocked, handleCanvasMouseMove, handleCanvasMouseLeave } = useGame(canvasRef);
-const { player, animals, obstacles, agentLogs, chatMessages, isAgentProcessing, isConnected, lastBlocked, isStopping, debugEntries, sendInit, sendMission, sendStop, sendMove, addLog, clearChat } = useWebSocket(sessionId);
+const { player, animals, obstacles, agentLogs, chatMessages, isAgentProcessing, isConnected, lastBlocked, isStopping, debugEntries, sendInit, sendMission, sendStop, sendMove, sendCatch, addLog, clearChat } = useWebSocket(sessionId);
 
 const logColor = {
   system: 'text-gray-400',
@@ -96,6 +96,11 @@ const keyDirMap = {
 };
 
 const handleKeydown = (e) => {
+  if (e.key === ' ') {
+    e.preventDefault();
+    sendCatch();
+    return;
+  }
   if (!keyDirMap[e.key]) return;
   e.preventDefault();
   sendMove(keyDirMap[e.key], 1);
@@ -169,7 +174,7 @@ onUnmounted(() => {
               <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
             </select>
           </div>
-          <textarea v-model="aiInstruction" placeholder="예: 빨간 호랑이와 분홍 기린을 찾아" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-blue-100 focus:border-blue-500 outline-none resize-none h-16" />
+          <textarea v-model="aiInstruction" placeholder="예: 빨간 호랑이와 분홍 기린을 잡아" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-blue-100 focus:border-blue-500 outline-none resize-none h-16" />
           <div class="flex gap-2 mt-2">
             <button v-if="!isAgentProcessing" class="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 rounded transition text-sm font-bold" @click="sendToAgent">
               Send

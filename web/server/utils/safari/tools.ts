@@ -1,12 +1,13 @@
 import { tool } from '@langchain/core/tools'
 import { z } from 'zod'
-import type { GameEngine, Direction } from './game-engine'
+import type { GameEngine, Direction, CatchResult } from './game-engine'
 
 export type AgentCallbacks = {
   onLog: (msg: string, logType: string, detail?: string) => void
   onChat: (role: string, content: string, image?: string) => void
   onStatus: (status: string) => void
   onPlayerMoved: (result: any) => void
+  onAnimalCaught: (result: CatchResult, gameState: any) => void
   onDebug: (phase: string, data: any) => void
 }
 
@@ -43,14 +44,21 @@ export const SYSTEM_PROMPT = `너는 'Vision Safari' 게임의 AI 에이전트�
 그리드에서 보이는 것들:
 - 'P' (파란 원) = 플레이어 (너)
 - '🌲' = 나무 (장애물, 통과 불가)
-- 색깔 배경 위의 동물 이모지 = 타겟
+- 색깔 배경 위의 동물 이모지 = 타겟 (장애물, 통과 불가)
 
 매 턴마다 현재 10x10 시야가 이미지로 자동 제공돼. 직접 캡처할 필요 없어.
+
+게임 루프 - 관찰 → 접근 → 포획:
+1. 시야 이미지를 관찰해서 타겟 동물을 찾는다.
+2. Move로 타겟 동물의 인접 타일까지 접근한다. (동물은 장애물이므로 위로 이동 불가)
+3. 동물 바로 옆에 도달하면 Catch(direction)를 호출해서 포획한다.
 
 필수 규칙:
 - 한 턴에 여러 도구를 동시에 호출할 수 있다. 예: Move + UpdateNotepad를 함께 호출.
 - 제공된 시야 이미지를 분석한 후 다음 행동을 결정해.
-- Move 결과에 "on_animal"이 포함되면, 타겟과 일치하는지 확인하고 다음 턴에 DeclareFound를 호출해.
+- 동물과 나무 모두 이동을 막는다. 동물 위로 걸어갈 수 없다.
+- 동물의 인접 타일(상하좌우)에 도달하면 Catch(direction)를 호출해서 포획해.
+- Catch 성공 후 타겟과 일치하면 DeclareFound를 호출해.
 - 모든 타겟을 찾은 후 DeclareDone을 호출해.
 - 이동이 막혔으면(actual_steps < 요청한 수) 다른 방향을 시도해.
 
@@ -76,7 +84,7 @@ export const SYSTEM_PROMPT = `너는 'Vision Safari' 게임의 AI 에이전트�
 - 보이지 않으면 메모장에서 이전 목격 정보를 확인해.
 - 그래도 없으면 체계적으로 탐색해 (예: 행 단위 스캔 또는 나선형 탐색).
 - Move 한 번 호출에 최대 4방향으로 연속 이동 가능. 예: 오른쪽 3칸 → 위 2칸을 한 번에 실행.
-- 나무는 이동을 막아. 막히면 해당 행동에서 중단되고 나머지는 실행되지 않아.`
+- 나무와 동물은 이동을 막아. 막히면 해당 행동에서 중단되고 나머지는 실행되지 않아.`
 
 const moveSchema = z.object({
   actions: z.array(z.object({
@@ -91,7 +99,7 @@ const declareDoneSchema = z.object({ reason: z.string().max(240).optional() })
 
 export const moveTool = tool(async () => 'ok', {
   name: 'move',
-  description: '플레이어를 이동시킨다. 최대 4개 행동을 순서대로 실행하며, 각 행동은 방향(UP/DOWN/LEFT/RIGHT)과 칸수(1~3)를 가진다. 중간에 장애물에 막히면 거기서 중단된다.',
+  description: '플레이어를 이동시킨다. 최대 4개 행동을 순서대로 실행하며, 각 행동은 방향(UP/DOWN/LEFT/RIGHT)과 칸수(1~3)를 가진다. 나무와 동물 모두 이동을 막으며, 중간에 막히면 거기서 중단된다.',
   schema: moveSchema,
 })
 
@@ -116,6 +124,36 @@ const moveHandler: ToolHandler = async (args, ctx) => {
   }
 
   return { lastResult }
+}
+
+const catchSchema = z.object({
+  direction: z.enum(['UP', 'DOWN', 'LEFT', 'RIGHT']),
+})
+
+export const catchTool = tool(async () => 'ok', {
+  name: 'catch',
+  description: '인접 타일(상하좌우)의 동물을 포획한다. 동물이 있는 방향을 지정하면 해당 동물을 잡아서 맵에서 제거한다.',
+  schema: catchSchema,
+})
+
+const catchHandler: ToolHandler = async (args, ctx) => {
+  const direction = String(args?.direction || 'RIGHT') as Direction
+  const result = ctx.engine.catchAnimal(direction)
+
+  if (result.success) {
+    ctx.callbacks.onLog(
+      `catch ${direction} -> ${result.animal!.emoji} 포획! (${result.position!.x}, ${result.position!.y})`,
+      'tool',
+    )
+    ctx.callbacks.onAnimalCaught(result, ctx.engine.getState())
+  } else {
+    ctx.callbacks.onLog(
+      `catch ${direction} -> 실패 (${result.reason})`,
+      'error',
+    )
+  }
+
+  return { lastResult: result }
 }
 
 export const updateNotepadTool = tool(async () => 'ok', {
@@ -160,11 +198,12 @@ const declareDoneHandler: ToolHandler = async (_args, ctx) => {
 
 export const toolHandlers: Record<string, ToolHandler> = {
   move: moveHandler,
+  catch: catchHandler,
   update_notepad: updateNotepadHandler,
   declare_found: declareFoundHandler,
   declare_done: declareDoneHandler,
 }
 
 export function getAllTools() {
-  return [moveTool, updateNotepadTool, declareFoundTool, declareDoneTool]
+  return [moveTool, catchTool, updateNotepadTool, declareFoundTool, declareDoneTool]
 }
