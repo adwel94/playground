@@ -5,7 +5,7 @@ import type { GameEngine } from './game-engine'
 import { SYSTEM_PROMPT, type AgentCallbacks } from './tools'
 import { createNodes, type ToolCall } from './nodes'
 import { DataCollector } from './data-collector'
-import { models } from './llm'
+import { getModels } from './llm'
 import type { AgentState } from '../../routes/_ws/safari'
 
 function wrapModelForDebug(
@@ -98,7 +98,7 @@ export async function startAgent(
   }
 
   const dataCollector = new DataCollector(mission)
-  const entry = models.find(m => m.id === resolvedModelId)
+  const entry = getModels().find(m => m.id === resolvedModelId)
   if (!entry) {
     callbacks.onLog(`사용할 수 없는 모델: ${resolvedModelId}`, 'error')
     callbacks.onStatus('stopped')

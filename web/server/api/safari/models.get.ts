@@ -1,5 +1,5 @@
-import { models } from '../../utils/safari/llm'
+import { getModels } from '../../utils/safari/llm'
 
 export default defineEventHandler(() => {
-  return models.map(({ id, label }) => ({ id, label }))
+  return getModels().map(({ id, label }) => ({ id, label }))
 })

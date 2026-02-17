@@ -11,5 +11,7 @@ export default defineNuxtConfig({
     googleApiKey: '',
     visionSafariModel: 'gemini-3-flash-preview',
     vllmBaseUrl: '',
+    runpodApiKey: '',
+    runpodApiUrl: '',
   },
 })

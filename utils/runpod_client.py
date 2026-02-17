@@ -123,13 +123,15 @@ def create(
     gpu_id: GPUType = GPUType.NVIDIA_GEFORCE_RTX_4090,
     gpu_count: int = 1,
     volume: int = 50,
-    image_name: str = "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+    image_name: str = "",
     start_command: list[str] = [],
     ports: list[str] = ["8888/http,22/tcp"],
+    template_id: str = "",
 ) -> str:
     """Pod을 생성하고 pod_id를 반환한다.
 
     26개 데이터센터 가용성 우선 배치, dockerStartCmd 지원.
+    template_id가 주어지면 RunPod 템플릿 기반으로 생성한다.
     """
     payload = {
         "cloudType": "COMMUNITY",
@@ -145,8 +147,6 @@ def create(
             "US-GA-1",
         ],
         "dataCenterPriority": "availability",
-        "dockerStartCmd": start_command,
-        "imageName": image_name,
         "env": env,
         "globalNetworking": False,
         "gpuTypeIds": [RUNPOD_GPU_MAP[gpu_id]],
@@ -160,6 +160,13 @@ def create(
         "volumeInGb": volume,
         "volumeMountPath": "/workspace",
     }
+
+    if template_id:
+        payload["templateId"] = template_id
+    if image_name:
+        payload["imageName"] = image_name
+    if start_command:
+        payload["dockerStartCmd"] = start_command
 
     response = requests.post(_BASE_URL, json=payload, headers=_headers())
     
@@ -207,37 +214,21 @@ def pod(pod_id: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# playground 전용 헬퍼
+# 템플릿 기반 헬퍼
 # ---------------------------------------------------------------------------
 
-def create_vlm_pod(
+def create_from_template(
     name: str,
-    model_name: str,
+    template_id: str,
     gpu_id: GPUType = GPUType.NVIDIA_GEFORCE_RTX_4090,
     gpu_count: int = 1,
-    volume: int = 100,
-    max_model_len: int = 4096,
-    gpu_memory_utilization: float = 0.9,
-    dtype: str = "half",
-    hf_token: str = "",
+    volume: int = 50,
 ) -> str:
-    """VLM 서빙용 Pod을 vLLM Worker 이미지로 생성한다."""
-    env = {
-        "MODEL_NAME": model_name,
-        "DTYPE": dtype,
-        "GPU_MEMORY_UTILIZATION": str(gpu_memory_utilization),
-        "MAX_MODEL_LEN": str(max_model_len),
-        "ENABLE_AUTO_TOOL_CHOICE": True,
-        "TOOL_CALL_PARSER": "hermes",
-        "HF_TOKEN": hf_token or os.getenv("HF_TOKEN", ""),
-        "HF_HOME": "/workspace/huggingface",
-        "LD_LIBRARY_PATH" :"/lib64:/usr/local/cuda/lib64"
-    }
+    """RunPod 템플릿 기반으로 Pod을 생성한다."""
     return create(
         name=name,
-        env=env,
         gpu_id=gpu_id,
         gpu_count=gpu_count,
         volume=volume,
-        image_name="vllm/vllm-openai:latest",
+        template_id=template_id,
     )
