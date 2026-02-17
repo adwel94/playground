@@ -20,11 +20,12 @@ DISCORD_CHANNELS = {
     DiscordChannel.ALERT: "ALERT_WEBHOOK_URL",
 }
 
-def send_discord(text: str, channel: Union[DiscordChannel, str] = DiscordChannel.SAFARI):
+def send_discord(text: str, channel: Union[DiscordChannel, str] = DiscordChannel.SAFARI, components: list = None):
     """
     Discord Webhook으로 메시지 전송.
     :param text: 전송할 메시지
     :param channel: DiscordChannel Enum 멤버 또는 등록된 키값 (기본값: DiscordChannel.SAFARI)
+    :param components: Discord 메시지 컴포넌트 (버튼 등)
     """
     # Enum이 아닌 문자열로 들어온 경우 Enum으로 변환 시도
     if isinstance(channel, str):
@@ -47,8 +48,12 @@ def send_discord(text: str, channel: Union[DiscordChannel, str] = DiscordChannel
     if len(text) > 2000:
         text = text[:1997] + "..."
 
+    payload = {"content": text}
+    if components:
+        payload["components"] = components
+
     try:
-        requests.post(url, json={"content": text}, timeout=10)
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
         print(f"  [discord:{channel}] error: {e}")
 
