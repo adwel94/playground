@@ -8,37 +8,14 @@ import { DataCollector } from './data-collector'
 import { getModels } from './llm'
 import type { AgentState } from '../../routes/_ws/safari'
 
-function wrapModelForDebug(
-  model: ChatGoogleGenerativeAI,
-  callbacks: AgentCallbacks,
-  dataCollector: DataCollector,
-) {
+function injectGeminiThinkingConfig(model: ChatGoogleGenerativeAI) {
   const original = model.completionWithRetry.bind(model)
   model.completionWithRetry = async function (request: any, options?: any) {
-    const t0 = Date.now()
-
-    // Inject thinkingConfig to capture model's thought process
     if (!request.generationConfig) request.generationConfig = {}
     if (!request.generationConfig.thinkingConfig) {
       request.generationConfig.thinkingConfig = { includeThoughts: true }
     }
-
-    const reqPayload = {
-      systemInstruction: (model as any).client?.systemInstruction,
-      contents: request.contents,
-      tools: request.tools,
-      toolConfig: request.toolConfig,
-      generationConfig: request.generationConfig,
-    }
-    callbacks.onDebug('request-payload', reqPayload)
-    dataCollector.recordRawPayload('request', reqPayload)
-
-    const result = await original(request, options)
-    const resPayload = { raw: result.response, durationMs: Date.now() - t0 }
-    callbacks.onDebug('response-payload', resPayload)
-    dataCollector.recordRawPayload('response', resPayload)
-
-    return result
+    return original(request, options)
   }
 }
 
@@ -97,7 +74,6 @@ export async function startAgent(
     return
   }
 
-  const dataCollector = new DataCollector(mission)
   const entry = getModels().find(m => m.id === resolvedModelId)
   if (!entry) {
     callbacks.onLog(`사용할 수 없는 모델: ${resolvedModelId}`, 'error')
@@ -107,18 +83,22 @@ export async function startAgent(
     return
   }
 
+  const dataCollector = entry.collectData ? new DataCollector(mission) : undefined
+
   if (entry.provider === 'gemini') {
-    wrapModelForDebug(entry.raw as ChatGoogleGenerativeAI, callbacks, dataCollector)
+    injectGeminiThinkingConfig(entry.raw as ChatGoogleGenerativeAI)
   }
   const model = entry.model
   callbacks.onLog(`에이전트 Model: ${entry.label}`, 'system')
-  callbacks.onLog(`[Dataset] 에피소드 ${dataCollector.episodeId} 수집 시작`, 'system')
+  if (dataCollector) {
+    callbacks.onLog(`[Dataset] 에피소드 ${dataCollector.episodeId} 수집 시작`, 'system')
+  }
   const { captureNode, agentNode, actNode, routeAfterAct } = createNodes({
     engine,
     callbacks,
     model,
     getPage: () => agentState.page,
-  isStopRequested: () => agentState.stopRequested,
+    isStopRequested: () => agentState.stopRequested,
     dataCollector,
   })
 

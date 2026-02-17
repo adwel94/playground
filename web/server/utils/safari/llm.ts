@@ -6,6 +6,7 @@ export type LLMEntry = {
   id: string
   label: string
   provider: 'gemini' | 'vllm'
+  collectData: boolean
   model: ReturnType<ChatGoogleGenerativeAI['bindTools']>
   raw: ChatGoogleGenerativeAI | ChatOpenAI
 }
@@ -34,6 +35,7 @@ export function initModels() {
         id: 'gemini',
         label: `Gemini (${modelName})`,
         provider: 'gemini',
+        collectData: true,
         model: raw.bindTools(tools),
         raw,
       })
@@ -47,14 +49,15 @@ export function initModels() {
     if (config.vllmBaseUrl) {
       const raw = new ChatOpenAI({
         configuration: { baseURL: config.vllmBaseUrl as string },
-        model: 'Qwen/Qwen3-VL-2B-Instruct',
+        model: 'Qwen3-VL-2B-Thinking-FP8',
         apiKey: 'EMPTY',
         temperature: 0,
       })
       models.push({
-        id: 'vllm',
-        label: 'vLLM (Qwen/Qwen3-VL-2B-Instruct)',
+        id: 'vllm-local',
+        label: 'vLLM (Qwen/Qwen3-VL-2B-Thinking-FP8)',
         provider: 'vllm',
+        collectData: false,
         model: raw.bindTools(tools),
         raw,
       })
@@ -76,6 +79,7 @@ export function initModels() {
         id: 'vllm-Qwen3-VL-4B',
         label: 'vLLM (Qwen/Qwen3-VL-4B-Thinking)',
         provider: 'vllm',
+        collectData: false,
         model: raw.bindTools(tools),
         raw,
       })

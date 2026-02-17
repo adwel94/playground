@@ -79,7 +79,26 @@ export function createNodes(ctx: NodeContext) {
         ] as any,
       }),
     ]
+
+    const reqPayload = {
+      messages: messages.map(m => ({ type: m._getType(), content: typeof m.content === 'string' ? m.content : '[multimodal]' })),
+    }
+    callbacks.onDebug('request-payload', reqPayload)
+    dataCollector?.recordRawPayload('request', reqPayload)
+
+    const t0 = Date.now()
     const response = await model.invoke(messages)
+
+    const resPayload = {
+      content: response.content,
+      toolCalls: (response as any).tool_calls,
+      additional_kwargs: (response as any).additional_kwargs,
+      response_metadata: (response as any).response_metadata,
+      usage_metadata: (response as any).usage_metadata,
+      durationMs: Date.now() - t0,
+    }
+    callbacks.onDebug('response-payload', resPayload)
+    dataCollector?.recordRawPayload('response', resPayload)
 
     const rawCalls = Array.isArray((response as any).tool_calls) ? (response as any).tool_calls : []
     const toolCalls: ToolCall[] = rawCalls.map((c: any) => ({ name: String(c.name), args: c.args || {} }))

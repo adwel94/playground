@@ -37,10 +37,21 @@ export class DataCollector {
   }
 
   private extractThought(): string | null {
+    // LangChain format: content 배열에 { type: "thinking", thinking: "..." } 블록
+    const content = this.rawResponse?.content
+    if (Array.isArray(content)) {
+      const thoughts = content
+        .filter((p: any) => p.type === 'thinking')
+        .map((p: any) => p.thinking)
+      if (thoughts.length > 0) return thoughts.join('\n')
+    }
+    // Legacy: raw Gemini API 형식 (기존 데이터 호환)
     const parts = this.rawResponse?.raw?.candidates?.[0]?.content?.parts
-    if (!Array.isArray(parts)) return null
-    const thoughts = parts.filter((p: any) => p.thought === true).map((p: any) => p.text)
-    return thoughts.length > 0 ? thoughts.join('\n') : null
+    if (Array.isArray(parts)) {
+      const thoughts = parts.filter((p: any) => p.thought === true).map((p: any) => p.text)
+      if (thoughts.length > 0) return thoughts.join('\n')
+    }
+    return null
   }
 
   async saveTurn(toolResults: { name: string; result: Record<string, any> }[]) {
