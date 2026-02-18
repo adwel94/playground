@@ -11,6 +11,7 @@ finally 블록에서 반드시 자가 종료 (과금 안전).
 """
 
 import json
+import time
 import traceback
 
 import requests
@@ -41,7 +42,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "move",
-            "description": "플레이어를 이동시킨다. 최대 4개 행동을 순서대로 실행하며, 각 행동은 방향(UP/DOWN/LEFT/RIGHT)과 칸수(1~3)를 가진다.",
+            "description": "플레이어를 이동시킨다. 최대 4개 행동을 순서대로 실행하며, 각 행동은 방향(UP/DOWN/LEFT/RIGHT)과 칸수(1~3)를 가진다. 나무와 동물 모두 이동을 막으며, 중간에 막히면 거기서 중단된다.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -70,6 +71,20 @@ TOOLS = [
                 "type": "object",
                 "properties": {"content": {"type": "string"}},
                 "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "catch",
+            "description": "인접 타일(상하좌우)의 동물을 포획한다. 동물이 있는 방향을 지정하면 해당 동물을 잡아서 맵에서 제거한다.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "direction": {"type": "string", "enum": ["UP", "DOWN", "LEFT", "RIGHT"]},
+                },
+                "required": ["direction"],
             },
         },
     },
@@ -138,6 +153,9 @@ def build_messages(example: dict) -> list[dict]:
 
     # Assistant message: thought + tool_calls
     tool_calls_raw = json.loads(example["tool_calls"]) if isinstance(example["tool_calls"], str) else example["tool_calls"]
+    # tool_result가 있는 tool_call만 포함 (결과 없는 호출은 템플릿 매핑 오류 유발)
+    tool_results_raw = json.loads(example["tool_results"]) if isinstance(example["tool_results"], str) else example["tool_results"]
+    result_names = {tr["name"] for tr in tool_results_raw}
     assistant_msg = {
         "role": "assistant",
         "content": example.get("thought_text") or "",
@@ -150,12 +168,12 @@ def build_messages(example: dict) -> list[dict]:
                 },
             }
             for tc in tool_calls_raw
+            if tc["name"] in result_names
         ],
     }
     messages.append(assistant_msg)
 
     # Tool results
-    tool_results_raw = json.loads(example["tool_results"]) if isinstance(example["tool_results"], str) else example["tool_results"]
     for tr in tool_results_raw:
         messages.append({
             "role": "tool",
@@ -173,24 +191,17 @@ def prepare_dataset(params: FlowParameters, processor):
     ds = load_dataset(params.hf_dataset_repo, split="train")
     print(f"  loaded {len(ds)} examples")
 
-    def formatting_func(examples):
-        """SFTTrainer용 포매팅 함수. 각 example을 chat template 텍스트로 변환."""
-        texts = []
-        for i in range(len(examples["episode_id"])):
-            example = {k: examples[k][i] for k in examples}
-            messages = build_messages(example)
+    def map_to_text_and_images(example):
+        messages = build_messages(example)
+        text = processor.apply_chat_template(
+            messages, tools=TOOLS, tokenize=False, add_generation_prompt=False,
+        )
+        return {"text": text, "images": [example["image"]]}
 
-            # apply_chat_template으로 텍스트 생성
-            text = processor.apply_chat_template(
-                messages,
-                tools=TOOLS,
-                tokenize=False,
-                add_generation_prompt=False,
-            )
-            texts.append(text)
-        return texts
-
-    return ds, formatting_func
+    ds = ds.map(map_to_text_and_images, remove_columns=ds.column_names,
+                desc="Converting to text+images format")
+    print(f"  mapped dataset columns: {ds.column_names}")
+    return ds
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +209,7 @@ def prepare_dataset(params: FlowParameters, processor):
 # ---------------------------------------------------------------------------
 
 @task(name="train", retries=0)
-def train(params: FlowParameters, ds, formatting_func, processor):
+def train(params: FlowParameters, ds, processor):
     print("[3/5] train — bf16 LoRA + SFTTrainer")
     t = params.training
 
@@ -231,12 +242,12 @@ def train(params: FlowParameters, ds, formatting_func, processor):
         learning_rate=t.learning_rate,
         num_train_epochs=t.num_train_epochs,
         bf16=t.bf16,
-        max_seq_length=t.max_seq_length,
+        max_length=t.max_seq_length,
         gradient_checkpointing=True,
         logging_steps=1,
         save_strategy="epoch",
+        dataset_text_field="text",
         remove_unused_columns=False,
-        dataset_kwargs={"skip_prepare_dataset": True},
         report_to="wandb" if use_wandb else "none",
     )
 
@@ -246,7 +257,6 @@ def train(params: FlowParameters, ds, formatting_func, processor):
         train_dataset=ds,
         peft_config=lora_config,
         processing_class=processor,
-        formatting_func=formatting_func,
     )
 
     # DiscordHook 콜백 등록
@@ -277,39 +287,44 @@ def train(params: FlowParameters, ds, formatting_func, processor):
 
 @task(name="upload_to_hub", retries=2, retry_delay_seconds=10)
 def upload_to_hub(params: FlowParameters):
-    print("[4/5] upload_to_hub — LoRA 어댑터 HF Hub 업로드")
+    branch = params.hf_output_branch
+    print(f"[4/5] upload_to_hub — LoRA 어댑터 HF Hub 업로드 (branch={branch})")
     from huggingface_hub import HfApi
 
     api = HfApi(token=params.hf_token)
     api.create_repo(params.hf_output_repo, exist_ok=True)
+    if branch != "main":
+        api.create_branch(repo_id=params.hf_output_repo, branch=branch, exist_ok=True)
     api.upload_folder(
         folder_path=params.training.output_dir,
         repo_id=params.hf_output_repo,
+        revision=branch,
         commit_message=f"Upload LoRA adapter (r={params.training.lora_r}, epochs={params.training.num_train_epochs})",
     )
-    print(f"  uploaded to https://huggingface.co/{params.hf_output_repo}")
+    print(f"  uploaded to https://huggingface.co/{params.hf_output_repo}/tree/{branch}")
 
 
 # ---------------------------------------------------------------------------
 # [5/5] self_terminate
 # ---------------------------------------------------------------------------
 
-@task(name="self_terminate", retries=1, retry_delay_seconds=5)
+@task(name="self_terminate", retries=3, retry_delay_seconds=30)
 def self_terminate(params: FlowParameters):
-    print("[5/5] self_terminate — Pod 자가 종료")
     pod_id = params.runpod_pod_id
     api_key = params.runpod_api_key
+    print(f"[5/5] self_terminate — Pod 자가 종료 (pod_id={pod_id})")
     if not pod_id or not api_key:
         print("  RUNPOD_POD_ID or RUNPOD_API_KEY not set, skipping self-terminate")
         return
-    try:
-        resp = requests.delete(
-            f"https://rest.runpod.io/v1/pods/{pod_id}",
-            headers={"Authorization": f"Bearer {api_key}"},
-        )
-        print(f"  terminate response: {resp.status_code} {resp.text}")
-    except Exception as e:
-        print(f"  terminate failed: {e}")
+    resp = requests.delete(
+        f"https://rest.runpod.io/v1/pods/{pod_id}",
+        headers={"Authorization": f"Bearer {api_key}"},
+        timeout=30,
+    )
+    print(f"  terminate response: {resp.status_code} {resp.text}")
+    resp.raise_for_status()
+    print(f"  Pod {pod_id} DELETE 요청 성공, 30초 대기 후 프로세스 종료")
+    time.sleep(30)
 
 
 # ---------------------------------------------------------------------------
@@ -324,18 +339,18 @@ def train_flow():
         if params.hf_token:
             login(token=params.hf_token)
         t = params.training
-        send_discord(f"🚀 *학습 시작*\nmodel: `{t.model_id}` | dataset: `{params.hf_dataset_repo}` | epochs: {t.num_train_epochs}")
+        send_discord(f"🚀 *학습 시작*\nmodel: `{t.model_id}` | dataset: `{params.hf_dataset_repo}` | epochs: {t.num_train_epochs}\npod: `{params.runpod_pod_id}`")
 
         processor = AutoProcessor.from_pretrained(t.model_id)
-        ds, formatting_func = prepare_dataset(params, processor)
-        train(params, ds, formatting_func, processor)
+        ds = prepare_dataset(params, processor)
+        train(params, ds, processor)
         upload_to_hub(params)
 
-        send_discord(f"✅ *학습 완료*\nhttps://huggingface.co/{params.hf_output_repo}")
+        send_discord(f"✅ *학습 완료*\nhttps://huggingface.co/{params.hf_output_repo}\npod: `{params.runpod_pod_id}`")
         print("ALL DONE")
     except Exception as e:
         traceback.print_exc()
-        send_discord(f"❌ *학습 실패*\n```{e}```")
+        send_discord(f"❌ *학습 실패*\npod: `{params.runpod_pod_id}`\n```{e}```")
         raise
     finally:
         if params:

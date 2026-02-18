@@ -37,6 +37,7 @@ class TrainingOptions(BaseModel):
 class FlowParameters(BaseModel):
     hf_dataset_repo: str = "adwel94/vision-safari-dataset"
     hf_output_repo: str = "adwel94/vision-safari-agent-lora"
+    hf_output_branch: str = "main"
     hf_token: str = ""
     runpod_api_key: str = ""
     runpod_pod_id: str = ""
@@ -53,6 +54,7 @@ class FlowParameters(BaseModel):
         return cls(
             hf_dataset_repo=os.environ.get("HF_DATASET_REPO", cls.model_fields["hf_dataset_repo"].default),
             hf_output_repo=os.environ.get("HF_OUTPUT_REPO", cls.model_fields["hf_output_repo"].default),
+            hf_output_branch=os.environ.get("HF_OUTPUT_BRANCH", cls.model_fields["hf_output_branch"].default),
             hf_token=os.environ.get("HF_TOKEN", ""),
             runpod_api_key=os.environ.get("RUNPOD_API_KEY", ""),
             runpod_pod_id=os.environ.get("RUNPOD_POD_ID", ""),
