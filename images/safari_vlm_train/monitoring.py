@@ -14,6 +14,6 @@ def login_wandb(project_name: str, run_name: str = None):
         name=run_name,
         project=project_name,
         entity=os.getenv("WANDB_ENTITY"),
-        reinit=True,
+        reinit="return_previous",
     )
     return True

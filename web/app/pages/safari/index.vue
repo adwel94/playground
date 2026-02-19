@@ -96,6 +96,15 @@ const keyDirMap = {
 };
 
 const handleKeydown = (e) => {
+  const target = e.target;
+  const isEditableTarget =
+    target instanceof HTMLElement &&
+    (target.isContentEditable ||
+      target.tagName === 'TEXTAREA' ||
+      (target.tagName === 'INPUT' && !['button', 'submit', 'checkbox', 'radio'].includes((target.getAttribute('type') || '').toLowerCase())));
+
+  if (isEditableTarget || e.isComposing) return;
+
   if (e.key === ' ') {
     e.preventDefault();
     sendCatch();
