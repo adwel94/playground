@@ -12,6 +12,7 @@ from utils.runpod_client import GPUType, create
 def launch_training_pod(
     hf_dataset_repo: str = "adwel94/vision-safari-dataset",
     hf_output_repo: str = "adwel94/vision-safari-agent-lora",
+    hf_output_branch: str = "main",
     hf_token: str = "",
     model_id: str = "Qwen/Qwen3-VL-2B-Thinking",
     lora_r: int = 16,
@@ -39,6 +40,7 @@ def launch_training_pod(
     env = {
         "HF_DATASET_REPO": hf_dataset_repo,
         "HF_OUTPUT_REPO": hf_output_repo,
+        "HF_OUTPUT_BRANCH": hf_output_branch,
         "HF_TOKEN": hf_token or os.getenv("HF_TOKEN", ""),
         "RUNPOD_API_KEY": os.getenv("RUNPOD_API_KEY", ""),
         "MODEL_ID": model_id,

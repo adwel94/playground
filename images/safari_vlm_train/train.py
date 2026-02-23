@@ -11,6 +11,7 @@ finally 블록에서 반드시 자가 종료 (과금 안전).
 """
 
 import json
+import os
 import time
 import traceback
 
@@ -214,7 +215,9 @@ def train(params: FlowParameters, ds, processor):
     t = params.training
 
     # WandB
-    use_wandb = login_wandb(params.wandb_project, run_name="safari-vlm-train")
+    pod_id = params.runpod_pod_id or "local"
+    run_name = f"safari-vlm-train-{pod_id}"
+    use_wandb = login_wandb(params.wandb_project, run_name=run_name)
 
     print("  loading model...")
     model = Qwen3VLForConditionalGeneration.from_pretrained(
@@ -261,7 +264,7 @@ def train(params: FlowParameters, ds, processor):
 
     # DiscordHook 콜백 등록
     trainer.add_callback(DiscordHook(
-        run_name="safari-vlm-train",
+        run_name=run_name,
         hook_steps=sft_config.logging_steps,
     ))
 
@@ -331,11 +334,18 @@ def self_terminate(params: FlowParameters):
 # main
 # ---------------------------------------------------------------------------
 
-@flow(name="safari-vlm-train", log_prints=True)
+def _flow_run_name() -> str:
+    pod_id = os.environ.get("RUNPOD_POD_ID", "local")
+    return f"safari-vlm-train-{pod_id}"
+
+
+@flow(name="safari-vlm-train", flow_run_name=_flow_run_name, log_prints=True)
 def train_flow():
     params = None
     try:
         params = load_config()
+        pod_id = params.runpod_pod_id or "local"
+        run_name = f"safari-vlm-train-{pod_id}"
         if params.hf_token:
             login(token=params.hf_token)
         t = params.training
