@@ -311,7 +311,7 @@ def upload_to_hub(params: FlowParameters):
 # [5/5] self_terminate
 # ---------------------------------------------------------------------------
 
-@task(name="self_terminate", retries=3, retry_delay_seconds=30)
+@task(name="self_terminate", retries=0)
 def self_terminate(params: FlowParameters):
     pod_id = params.runpod_pod_id
     api_key = params.runpod_api_key
@@ -319,15 +319,29 @@ def self_terminate(params: FlowParameters):
     if not pod_id or not api_key:
         print("  RUNPOD_POD_ID or RUNPOD_API_KEY not set, skipping self-terminate")
         return
-    resp = requests.delete(
-        f"https://rest.runpod.io/v1/pods/{pod_id}",
-        headers={"Authorization": f"Bearer {api_key}"},
-        timeout=30,
-    )
-    print(f"  terminate response: {resp.status_code} {resp.text}")
-    resp.raise_for_status()
-    print(f"  Pod {pod_id} DELETE 요청 성공, 30초 대기 후 프로세스 종료")
-    time.sleep(30)
+
+    max_attempts = 100
+    for attempt in range(1, max_attempts + 1):
+        try:
+            send_discord(f"🗑️ Pod 삭제 시도 [{attempt}/{max_attempts}] — pod: `{pod_id}`")
+            resp = requests.delete(
+                f"https://rest.runpod.io/v1/pods/{pod_id}",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=30,
+            )
+            print(f"  [{attempt}] terminate response: {resp.status_code} {resp.text}")
+            resp.raise_for_status()
+            send_discord(f"✅ Pod 삭제 성공 [{attempt}/{max_attempts}] — pod: `{pod_id}`")
+            print(f"  Pod {pod_id} DELETE 요청 성공, 30초 대기 후 프로세스 종료")
+            time.sleep(30)
+            return
+        except Exception as e:
+            print(f"  [{attempt}] 삭제 실패: {e}")
+            if attempt < max_attempts:
+                time.sleep(30)
+
+    send_discord(f"🚨 Pod 삭제 {max_attempts}회 모두 실패! 수동 확인 필요 — pod: `{pod_id}`")
+    print(f"  Pod {pod_id} 삭제 {max_attempts}회 실패")
 
 
 # ---------------------------------------------------------------------------
