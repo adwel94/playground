@@ -1,7 +1,9 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages'
+import type { ChatOpenAI } from '@langchain/openai'
 import type { Page } from 'playwright'
 import type { GameEngine } from './game-engine'
-import { SYSTEM_PROMPT, toolHandlers, safePos, type AgentCallbacks } from './tools'
+import { SYSTEM_PROMPT, toolHandlers, safePos, getAllTools, type AgentCallbacks } from './tools'
+import { convertToOpenAITool } from '@langchain/core/utils/function_calling'
 import type { DataCollector } from './data-collector'
 
 export type ToolCall = { name: string; args: Record<string, any> }
@@ -22,13 +24,88 @@ type NodeContext = {
   engine: GameEngine
   callbacks: AgentCallbacks
   model: any
+  raw?: ChatOpenAI
   getPage: () => Page | null
   isStopRequested: () => boolean
   dataCollector?: DataCollector
 }
 
+/**
+ * 모델이 tool_calls args를 list로 반환하여 zod 검증 실패 시,
+ * raw OpenAI client로 재호출하여 args를 dict로 자동 래핑한다.
+ * 예: [{"direction":"RIGHT","steps":2}] → {"actions":[{"direction":"RIGHT","steps":2}]}
+ */
+async function invokeWithToolFallback(
+  model: any,
+  raw: ChatOpenAI | undefined,
+  messages: any[],
+  callbacks: AgentCallbacks,
+  step: number,
+): Promise<any> {
+  try {
+    return await model.invoke(messages)
+  } catch (err: any) {
+    const errMsg = err?.message || String(err)
+    // args가 list로 반환된 zod 검증 에러인지 확인
+    const isArgsListError = errMsg.includes('Expected object') || errMsg.includes('expected_type')
+    if (!isArgsListError || !raw) throw err
+
+    callbacks.onLog(`[턴 ${step}] args list→dict 보정 fallback 적용`, 'system')
+
+    // raw OpenAI client로 tool 스키마 포함 재호출
+    const openaiTools = getAllTools().map(t => convertToOpenAITool(t))
+    const openaiMessages = messages.map((m: any) => {
+      const type = m._getType?.()
+      if (type === 'system') return { role: 'system' as const, content: m.content }
+      if (type === 'human') return { role: 'user' as const, content: m.content }
+      return { role: 'assistant' as const, content: m.content || '' }
+    })
+
+    const rawClient = (raw as any).client
+    if (!rawClient?.chat?.completions) throw err
+
+    const rawResp = await rawClient.chat.completions.create({
+      model: (raw as any).model || (raw as any).modelName,
+      messages: openaiMessages,
+      tools: openaiTools,
+      temperature: 0,
+      max_tokens: (raw as any).maxTokens || 4096,
+    })
+
+    const choice = rawResp.choices?.[0]
+    if (!choice) throw err
+
+    // tool_calls 파싱 + args list→dict 보정
+    const fixedToolCalls = (choice.message?.tool_calls || []).map((tc: any) => {
+      let args = typeof tc.function.arguments === 'string'
+        ? JSON.parse(tc.function.arguments)
+        : tc.function.arguments
+      if (Array.isArray(args)) {
+        args = { actions: args }
+        callbacks.onLog(`  [보정] ${tc.function.name}: args list → {"actions": [...]} 래핑`, 'system')
+      }
+      return { name: tc.function.name, args, id: tc.id }
+    })
+
+    // langchain AIMessage 호환 형태로 반환
+    return {
+      content: choice.message?.content || '',
+      tool_calls: fixedToolCalls,
+      additional_kwargs: { tool_calls: choice.message?.tool_calls || [] },
+      response_metadata: {
+        token_usage: {
+          prompt_tokens: rawResp.usage?.prompt_tokens || 0,
+          completion_tokens: rawResp.usage?.completion_tokens || 0,
+          total_tokens: rawResp.usage?.total_tokens || 0,
+        },
+      },
+      usage_metadata: rawResp.usage,
+    }
+  }
+}
+
 export function createNodes(ctx: NodeContext) {
-  const { engine, callbacks, model, getPage, isStopRequested, dataCollector } = ctx
+  const { engine, callbacks, model, raw, getPage, isStopRequested, dataCollector } = ctx
 
   const captureNode = async (state: any) => {
     if (isStopRequested()) {
@@ -90,7 +167,7 @@ export function createNodes(ctx: NodeContext) {
     const t0 = Date.now()
     let response
     try {
-      response = await model.invoke(messages)
+      response = await invokeWithToolFallback(model, raw, messages, callbacks, state.step + 1)
     } catch (err: any) {
       const durationMs = Date.now() - t0
       callbacks.onLog(`[턴 ${state.step + 1}] 모델 호출 실패 (${(durationMs / 1000).toFixed(1)}s): ${err?.message || err}`, 'error')

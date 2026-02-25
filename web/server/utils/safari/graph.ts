@@ -97,6 +97,7 @@ export async function startAgent(
     engine,
     callbacks,
     model,
+    raw: entry.provider === 'vllm' ? entry.raw as any : undefined,
     getPage: () => agentState.page,
     isStopRequested: () => agentState.stopRequested,
     dataCollector,
