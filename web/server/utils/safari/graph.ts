@@ -1,5 +1,4 @@
 import { Annotation, END, START, StateGraph } from '@langchain/langgraph'
-import { ChatGoogleGenerativeAI } from '@langchain/google-genai'
 import { chromium } from 'playwright'
 import type { GameEngine } from './game-engine'
 import { SYSTEM_PROMPT, type AgentCallbacks } from './tools'
@@ -7,17 +6,6 @@ import { createNodes, type ToolCall } from './nodes'
 import { DataCollector } from './data-collector'
 import { getModels } from './llm'
 import type { AgentState } from '../../routes/_ws/safari'
-
-function injectGeminiThinkingConfig(model: ChatGoogleGenerativeAI) {
-  const original = model.completionWithRetry.bind(model)
-  model.completionWithRetry = async function (request: any, options?: any) {
-    if (!request.generationConfig) request.generationConfig = {}
-    if (!request.generationConfig.thinkingConfig) {
-      request.generationConfig.thinkingConfig = { includeThoughts: true }
-    }
-    return original(request, options)
-  }
-}
 
 const GraphState = Annotation.Root({
   mission: Annotation<string>,
@@ -85,9 +73,6 @@ export async function startAgent(
 
   const dataCollector = entry.collectData ? new DataCollector(mission) : undefined
 
-  if (entry.provider === 'gemini') {
-    injectGeminiThinkingConfig(entry.raw as ChatGoogleGenerativeAI)
-  }
   const model = entry.model
   callbacks.onLog(`에이전트 Model: ${entry.label}`, 'system')
   if (dataCollector) {

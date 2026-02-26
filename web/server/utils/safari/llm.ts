@@ -30,6 +30,7 @@ export function initModels() {
         apiKey: config.googleApiKey as string,
         model: modelName,
         temperature: 0,
+        thinkingConfig: { includeThoughts: true },
       })
       models.push({
         id: 'gemini',
