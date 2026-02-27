@@ -16,8 +16,10 @@ const { data: availableModels } = useFetch('/api/safari/models');
 
 const sessionId = crypto.randomUUID()
 
+const autoRounds = ref(10);
+
 const { hoverCoord, draw, flashBlocked, handleCanvasMouseMove, handleCanvasMouseLeave } = useGame(canvasRef);
-const { player, animals, obstacles, agentLogs, chatMessages, isAgentProcessing, isConnected, lastBlocked, isStopping, debugEntries, sendInit, sendMission, sendStop, sendMove, sendCatch, addLog, clearChat } = useWebSocket(sessionId);
+const { player, animals, obstacles, agentLogs, chatMessages, isAgentProcessing, isConnected, lastBlocked, isStopping, debugEntries, isAutoPlaying, autoProgress, sendInit, sendMission, sendStop, sendMove, sendCatch, sendStartAuto, sendStopAuto, addLog, clearChat } = useWebSocket(sessionId);
 
 const logColor = {
   system: 'text-gray-400',
@@ -86,6 +88,10 @@ async function sendToAgent() {
   if (!aiInstruction.value.trim()) return;
   clearChat();
   sendMission(aiInstruction.value, selectedModelId.value);
+}
+
+function startAuto() {
+  sendStartAuto(autoRounds.value, selectedModelId.value);
 }
 
 const keyDirMap = {
@@ -183,12 +189,12 @@ onUnmounted(() => {
               <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.label }}</option>
             </select>
           </div>
-          <textarea v-model="aiInstruction" placeholder="예: 빨간 호랑이와 분홍 기린을 잡아" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-blue-100 focus:border-blue-500 outline-none resize-none h-16" />
+          <textarea v-model="aiInstruction" placeholder="예: 빨간 호랑이와 분홍 기린을 잡아" class="w-full bg-gray-900 border border-gray-700 rounded p-2 text-sm text-blue-100 focus:border-blue-500 outline-none resize-none h-16" :disabled="isAutoPlaying" />
           <div class="flex gap-2 mt-2">
-            <button v-if="!isAgentProcessing" class="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 rounded transition text-sm font-bold" @click="sendToAgent">
+            <button v-if="!isAgentProcessing && !isAutoPlaying" class="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 rounded transition text-sm font-bold" @click="sendToAgent">
               Send
             </button>
-            <template v-else>
+            <template v-else-if="isAgentProcessing && !isAutoPlaying">
               <div class="flex-1 py-1.5 bg-gray-700 rounded text-sm font-bold flex items-center justify-center gap-2">
                 <span class="animate-spin text-lg">↻</span> Running...
               </div>
@@ -203,6 +209,44 @@ onUnmounted(() => {
                 <span class="animate-pulse">⏳</span> 중단 대기 중...
               </div>
             </template>
+          </div>
+
+          <!-- AutoPlay -->
+          <div class="mt-3 pt-3 border-t border-gray-700">
+            <h3 class="text-xs font-semibold uppercase text-gray-500 mb-2">Auto Play</h3>
+            <div class="flex gap-2 items-center">
+              <input
+                v-model.number="autoRounds"
+                type="number"
+                min="1"
+                max="100"
+                class="w-20 bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 focus:border-blue-500 outline-none"
+                :disabled="isAutoPlaying || isAgentProcessing"
+              >
+              <span class="text-xs text-gray-500">에피소드</span>
+              <button
+                v-if="!isAutoPlaying"
+                class="flex-1 py-1.5 bg-green-600 hover:bg-green-500 rounded transition text-sm font-bold"
+                :disabled="isAgentProcessing"
+                @click="startAuto"
+              >
+                자동 플레이
+              </button>
+              <template v-else>
+                <div class="flex-1 py-1.5 bg-gray-700 rounded text-sm font-bold flex items-center justify-center gap-2">
+                  <span class="animate-spin text-lg">↻</span> {{ autoProgress.current }}/{{ autoProgress.total }}
+                </div>
+                <button
+                  class="px-3 py-1.5 bg-red-600 hover:bg-red-500 rounded transition text-sm font-bold"
+                  @click="sendStopAuto"
+                >
+                  중지
+                </button>
+              </template>
+            </div>
+            <div v-if="isAutoPlaying && autoProgress.mission" class="mt-1 text-xs text-gray-400 truncate">
+              미션: {{ autoProgress.mission }}
+            </div>
           </div>
         </div>
 

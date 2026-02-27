@@ -24,3 +24,4 @@ logs
 !.env.example
 /.claude/
 /data/
+/docker-compose/

@@ -24,6 +24,8 @@ export function useWebSocket(sessionId: string) {
   const lastBlocked = ref<{ direction: string; pos: { x: number; y: number } } | null>(null)
   const isStopping = ref(false)
   const debugEntries = ref<DebugEntry[]>([])
+  const isAutoPlaying = ref(false)
+  const autoProgress = ref({ current: 0, total: 0, mission: '' })
 
   let ws: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -124,6 +126,16 @@ export function useWebSocket(sessionId: string) {
           isAgentProcessing.value = msg.status === 'running'
           if (msg.status !== 'running') isStopping.value = false
           break
+
+        case 'autoProgress':
+          isAutoPlaying.value = true
+          autoProgress.value = { current: msg.current, total: msg.total, mission: msg.mission || '' }
+          break
+
+        case 'autoComplete':
+          isAutoPlaying.value = false
+          addLog(`자동 플레이 완료: ${msg.completed}/${msg.total} 에피소드`, 'system')
+          break
       }
     }
   }
@@ -171,6 +183,18 @@ export function useWebSocket(sessionId: string) {
     send({ type: 'catch' })
   }
 
+  function sendStartAuto(rounds: number, modelId?: string) {
+    chatMessages.value = []
+    debugEntries.value = []
+    addLog(`자동 플레이 시작: ${rounds} 에피소드`, 'user')
+    send({ type: 'start-auto', rounds, modelId: modelId || 'gemini' })
+  }
+
+  function sendStopAuto() {
+    send({ type: 'stop-auto' })
+    addLog('자동 플레이 중단 요청', 'user')
+  }
+
   function clearChat() {
     chatMessages.value = []
   }
@@ -194,6 +218,8 @@ export function useWebSocket(sessionId: string) {
     lastBlocked,
     isStopping,
     debugEntries,
+    isAutoPlaying,
+    autoProgress,
     addLog,
     clearChat,
     sendInit,
@@ -201,6 +227,8 @@ export function useWebSocket(sessionId: string) {
     sendStop,
     sendMove,
     sendCatch,
+    sendStartAuto,
+    sendStopAuto,
     connect,
   }
 }

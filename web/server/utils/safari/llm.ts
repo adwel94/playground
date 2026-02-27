@@ -50,14 +50,14 @@ export function initModels() {
     if (config.vllmBaseUrl) {
       const raw = new ChatOpenAI({
         configuration: { baseURL: config.vllmBaseUrl as string },
-        model: 'Qwen3-VL-2B-Thinking-FP8',
+        model: 'safari-lora',
         apiKey: 'EMPTY',
         temperature: 0,
         maxTokens: 4096,
       })
       models.push({
-        id: 'vllm-Qwen3-VL-2B-Thinking-FP8',
-        label: 'vLLM (Qwen/Qwen3-VL-2B-Thinking-FP8)',
+        id: 'vllm-safari-lora',
+        label: 'vLLM (Safari Agent LoRA)',
         provider: 'vllm',
         collectData: false,
         model: raw.bindTools(tools),

@@ -62,12 +62,12 @@ function initModels() {
     if (config.vllmBaseUrl) {
       const raw = new ChatOpenAI({
         configuration: { baseURL: config.vllmBaseUrl as string },
-        model: 'Qwen3-VL-2B-Thinking-FP8',
+        model: 'emoji-lora',
         apiKey: 'EMPTY',
         temperature: 0,
-        maxTokens: 4096,
+        maxTokens: 8192,
       })
-      models.push({ id: 'vllm-Qwen3-VL-2B-Thinking-FP8', label: 'vLLM (Qwen3-VL-2B-Thinking-FP8)', provider: 'vllm', collectData: false, raw })
+      models.push({ id: 'vllm-emoji-lora', label: 'vLLM (Emoji LoRA)', provider: 'vllm', collectData: false, raw })
     }
   } catch (err) {
     console.error('[EmojiRec LLM] vLLM 초기화 실패:', err)
@@ -172,8 +172,7 @@ export async function identifyAnimals(screenshotDataUrl: string, modelId?: strin
   const boundModel = llm.bindTools(tools)
 
   const contextText = `이 이미지에서 보이는 동물을 모두 식별해주세요.
-각 동물의 위치(x,y), 배경색, 동물 종류를 정확히 기록해주세요.
-update_notepad 도구를 사용하여 결과를 기록하세요.`
+각 동물의 위치(x,y), 배경색, 동물 종류를 정확히 기록해주세요.`
 
   const response = await boundModel.invoke([
     new SystemMessage(EMOJI_REC_SYSTEM_PROMPT),

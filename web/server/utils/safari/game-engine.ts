@@ -57,6 +57,28 @@ const COLORS = [
   '#800080'  // Purple
 ]
 
+const COLOR_NAME_KO: Record<string, string> = {
+  '#FF0000': '빨간',
+  '#00FF00': '초록',
+  '#0000FF': '파란',
+  '#FFFF00': '노란',
+  '#FF00FF': '분홍',
+  '#00FFFF': '하늘',
+  '#FFA500': '주황',
+  '#800080': '보라',
+}
+
+const ANIMAL_NAME_KO: Record<string, string> = {
+  '🐯': '호랑이',
+  '🐘': '코끼리',
+  '🦒': '기린',
+  '🐒': '원숭이',
+  '🦓': '얼룩말',
+  '🦁': '사자',
+  '🐷': '돼지',
+  '🐨': '코알라',
+}
+
 export function createGameEngine() {
   let player = { x: 25, y: 25 }
   let animals: Animal[] = []
@@ -176,6 +198,24 @@ export function createGameEngine() {
     return { ...player }
   }
 
+  function generateRandomMission(): string {
+    if (animals.length === 0) return '맵을 탐색해'
+
+    // 동물 목록에서 1~3마리 랜덤 선택 (중복 없이)
+    const count = Math.min(animals.length, Math.floor(Math.random() * 3) + 1)
+    const shuffled = [...animals].sort(() => Math.random() - 0.5)
+    const targets = shuffled.slice(0, count)
+
+    const descriptions = targets.map(a => {
+      const colorName = COLOR_NAME_KO[a.bgColor] || '색깔'
+      const animalName = ANIMAL_NAME_KO[a.emoji] || '동물'
+      return `${colorName} ${animalName}`
+    })
+
+    if (descriptions.length === 1) return `${descriptions[0]}을 찾아`
+    return `${descriptions.join('와 ')}를 찾아`
+  }
+
   // Initialize on creation
   initGame()
 
@@ -186,6 +226,7 @@ export function createGameEngine() {
     getState,
     getAgentView,
     getPlayer,
+    generateRandomMission,
   }
 }
 

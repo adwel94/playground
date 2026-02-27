@@ -8,11 +8,19 @@ export type AgentState = {
   isRunning: boolean
 }
 
+type AutoPlayState = {
+  isRunning: boolean
+  stopRequested: boolean
+  current: number
+  total: number
+}
+
 type Session = {
   id: string
   engine: GameEngine
   peers: Set<any>
   agentState: AgentState
+  autoPlayState: AutoPlayState
 }
 
 const sessions = new Map<string, Session>()
@@ -32,6 +40,12 @@ function getOrCreateSession(sessionId: string): Session {
         page: null,
         stopRequested: false,
         isRunning: false,
+      },
+      autoPlayState: {
+        isRunning: false,
+        stopRequested: false,
+        current: 0,
+        total: 0,
       },
     }
     sessions.set(sessionId, session)
@@ -54,6 +68,85 @@ function broadcastToSession(sessionId: string, message: any) {
 
 function getSessionIdFromPeer(peer: any): string | null {
   return (peer as any).__safariSessionId ?? null
+}
+
+async function runAutoPlay(session: Session, sessionId: string, totalRounds: number, modelId: string) {
+  if (session.autoPlayState.isRunning) {
+    broadcastToSession(sessionId, { type: 'agentLog', msg: '이미 자동 플레이 실행 중입니다.', logType: 'error' })
+    return
+  }
+
+  // Lazy-load agent runner
+  if (!agentRunnerModule) {
+    agentRunnerModule = await import('../../utils/safari/graph')
+  }
+
+  session.autoPlayState = { isRunning: true, stopRequested: false, current: 0, total: totalRounds }
+  broadcastToSession(sessionId, { type: 'autoProgress', current: 0, total: totalRounds, mission: '' })
+
+  try {
+    for (let i = 0; i < totalRounds; i++) {
+      if (session.autoPlayState.stopRequested) {
+        broadcastToSession(sessionId, { type: 'agentLog', msg: '자동 플레이가 사용자에 의해 중지됨', logType: 'system' })
+        break
+      }
+
+      // 1. 맵 리셋
+      session.engine.initGame()
+      broadcastToSession(sessionId, { type: 'gameState', state: session.engine.getState() })
+
+      // 2. 미션 자동 생성
+      const mission = session.engine.generateRandomMission()
+      broadcastToSession(sessionId, { type: 'autoProgress', current: i + 1, total: totalRounds, mission })
+      broadcastToSession(sessionId, { type: 'agentLog', msg: `[AutoPlay ${i + 1}/${totalRounds}] 미션: ${mission}`, logType: 'system' })
+
+      // 3. 에이전트 실행 (기존 startAgent 재사용)
+      const callbacks = {
+        onLog(logMsg: string, logType: string, detail?: string) {
+          broadcastToSession(sessionId, { type: 'agentLog', msg: logMsg, logType, detail })
+        },
+        onChat(role: string, content: string, image?: string) {
+          broadcastToSession(sessionId, { type: 'agentChat', role, content, image })
+        },
+        onStatus(status: string) {
+          broadcastToSession(sessionId, { type: 'agentStatus', status })
+        },
+        onPlayerMoved(result: any) {
+          broadcastToSession(sessionId, {
+            type: 'playerMoved',
+            pos: result.pos,
+            moved: result.moved,
+            blocked: result.blocked,
+            actualSteps: result.actualSteps,
+            direction: result.direction,
+          })
+        },
+        onAnimalCaught(result: any, gameState: any) {
+          broadcastToSession(sessionId, {
+            type: 'animalCaught',
+            success: result.success,
+            animal: result.animal,
+            position: result.position,
+          })
+          broadcastToSession(sessionId, {
+            type: 'gameState',
+            state: gameState,
+          })
+        },
+        onDebug(phase: string, data: any) {
+          broadcastToSession(sessionId, { type: 'agentDebug', phase, data })
+        },
+      }
+
+      await agentRunnerModule.startAgent(mission, session.engine, callbacks, session.agentState, sessionId, modelId)
+      session.autoPlayState.current = i + 1
+    }
+  } catch (err: any) {
+    broadcastToSession(sessionId, { type: 'agentLog', msg: `AutoPlay 에러: ${err?.message}`, logType: 'error' })
+  } finally {
+    session.autoPlayState.isRunning = false
+    broadcastToSession(sessionId, { type: 'autoComplete', total: totalRounds, completed: session.autoPlayState.current })
+  }
 }
 
 function cleanupSession(sessionId: string) {
@@ -194,6 +287,22 @@ export default defineWebSocketHandler({
       }
 
       case 'stop': {
+        if (agentRunnerModule) {
+          agentRunnerModule.stopAgent(session.agentState)
+        }
+        break
+      }
+
+      case 'start-auto': {
+        const rounds = Math.max(1, Math.min(100, Number(msg.rounds) || 10))
+        const modelId = String(msg.modelId || 'gemini')
+        runAutoPlay(session, sessionId, rounds, modelId)
+        break
+      }
+
+      case 'stop-auto': {
+        session.autoPlayState.stopRequested = true
+        // 현재 실행 중인 에이전트도 중지
         if (agentRunnerModule) {
           agentRunnerModule.stopAgent(session.agentState)
         }

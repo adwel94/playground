@@ -78,7 +78,11 @@ def load_config() -> FlowParameters:
 # ---------------------------------------------------------------------------
 
 def build_messages(example: dict) -> list[dict]:
-    """HF 데이터셋 row를 Qwen3-VL 메시지 리스트로 변환."""
+    """HF 데이터셋 row를 Qwen3-VL 메시지 리스트로 변환.
+
+    answer_text(프로그래밍적으로 생성된 정답)를 사용하여
+    update_notepad tool_call을 직접 구성한다.
+    """
     messages = [
         {"role": "system", "content": example["system_prompt"]},
         {
@@ -90,35 +94,28 @@ def build_messages(example: dict) -> list[dict]:
         },
     ]
 
-    # Assistant message: thought + tool_calls
-    tool_calls_raw = json.loads(example["tool_calls"]) if isinstance(example["tool_calls"], str) else example["tool_calls"]
-    # tool_result가 있는 tool_call만 포함 (결과 없는 호출은 템플릿 매핑 오류 유발)
-    tool_results_raw = json.loads(example["tool_results"]) if isinstance(example["tool_results"], str) else example["tool_results"]
-    result_names = {tr["name"] for tr in tool_results_raw}
+    # Ground truth 기반 tool_call 생성
+    answer_text = example.get("answer_text") or ""
+    answer_lines = [f"- {line}" for line in answer_text.strip().split("\n") if line.strip()]
+    notepad_content = "[관찰]\n" + "\n".join(answer_lines)
+
     assistant_msg = {
         "role": "assistant",
         "content": example.get("thought_text") or "",
-        "tool_calls": [
-            {
-                "type": "function",
-                "function": {
-                    "name": tc["name"],
-                    "arguments": json.dumps(tc["args"], ensure_ascii=False),
-                },
-            }
-            for tc in tool_calls_raw
-            if tc["name"] in result_names
-        ],
+        "tool_calls": [{
+            "type": "function",
+            "function": {
+                "name": "update_notepad",
+                "arguments": json.dumps({"content": notepad_content}, ensure_ascii=False),
+            },
+        }],
     }
     messages.append(assistant_msg)
-
-    # Tool results
-    for tr in tool_results_raw:
-        messages.append({
-            "role": "tool",
-            "name": tr["name"],
-            "content": json.dumps(tr["result"], ensure_ascii=False),
-        })
+    messages.append({
+        "role": "tool",
+        "name": "update_notepad",
+        "content": json.dumps({"status": "updated"}, ensure_ascii=False),
+    })
 
     return messages
 
